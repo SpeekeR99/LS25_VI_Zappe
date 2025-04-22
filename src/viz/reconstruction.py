@@ -6,6 +6,11 @@
 # |                                                                                                    - Dominik Zappe |
 # └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
+import os
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
 import pandas as pd
 import numpy as np
 import datetime
@@ -34,7 +39,7 @@ class Config:
     port = 1234
 
     # Data config
-    path = "data/"
+    path = "../data/"
     df_cols = ["Price", "DisplayQty", "Q", "od", "do", "Trans", "Prio"]
     df_cols_type = {"Price": np.float64, "DisplayQty": np.int64, "Q": np.int64, "od": np.int64, "do": np.int64, "Trans": np.int64, "Prio": str}
     delim = ","
