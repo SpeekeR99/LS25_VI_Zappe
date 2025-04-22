@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import plotly_resampler
 from plotly_resampler import FigureResampler
 
-from dash import Dash, dcc, html
+from dash import Dash, dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
 
@@ -23,7 +23,7 @@ def load_data(date, market_segment_id, security, level_depth=1):
     while True:
         if f"Ask Price {i}" not in data.columns and f"Bid Price {i}" not in data.columns:
             break
-        data = data.drop(columns=[f"Ask Price {i}", f"Bid Price {i}"], errors='ignore')
+        data = data.drop(columns=[f"Ask Price {i}", f"Bid Price {i}"], errors="ignore")
     return data
 
 
@@ -40,7 +40,7 @@ def load_all_data(level_depth=1):
     return data, names
 
 
-def aggregate_data(all_data, metric="Ask Price 1", time_window=3600):
+def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_window=3600):
     # X axis is time (timestamps), Y axis are different data files (all_data[0], all_data[1], ...)
     # Color is the price at that given time-window (aggregated -- e.g. mean, median, etc.)
     # Aggregate the whole day into 1 hour intervals -- 24 bins
@@ -48,7 +48,7 @@ def aggregate_data(all_data, metric="Ask Price 1", time_window=3600):
     day_sec = 60 * 60 * 24
     for data in all_data:
         tmp_agg = []
-        timestamps = pd.to_datetime(data["Time"].values, unit='ns')
+        timestamps = pd.to_datetime(data["Time"].values, unit="ns")
         timestamps_series = pd.Series(timestamps)
         seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
 
@@ -62,7 +62,9 @@ def aggregate_data(all_data, metric="Ask Price 1", time_window=3600):
             if data_in_window.empty:
                 tmp_agg.append(np.nan)
                 continue
-            tmp_agg.append(np.mean(data_in_window.values))
+            # Use the aggregation function passed as argument
+            tmp_agg.append(aggregation(data_in_window.values))
+
         # Normalize the metric to [0, 1]
         tmp_agg = np.array(tmp_agg)
         tmp_agg = (tmp_agg - np.nanmin(tmp_agg)) / (np.nanmax(tmp_agg) - np.nanmin(tmp_agg))
@@ -82,6 +84,14 @@ def main():
     app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
     level_depth = 5
+    chosen_aggregation = "Mean"
+    aggregation_functions_map = {
+        "Mean": np.mean,
+        "Median": np.median,
+        "Max": np.max,
+        "Min": np.min,
+        "Std": np.std
+    }
     time_window_aggregation = 3600
     metric = "Ask Price 1"
     print("Loading data...")
@@ -91,12 +101,12 @@ def main():
     # names = ["20191202_688_4128839", "20210319_1176_2299728"]
     all_data, names = load_all_data(level_depth=level_depth)
     data = all_data[0]
-    aggregated_data = aggregate_data(all_data, metric=metric, time_window=time_window_aggregation)
+    aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
     timestamps = data["Time"].values
-    ask_prices = [data[f'Ask Price {i}'].values for i in range(1, level_depth+1)]
-    bid_prices = [data[f'Bid Price {i}'].values for i in range(1, level_depth+1)]
+    ask_prices = [data[f"Ask Price {i}"].values for i in range(1, level_depth+1)]
+    bid_prices = [data[f"Bid Price {i}"].values for i in range(1, level_depth+1)]
     imbalance_indices = data["Imbalance Index"].values
     freqs = data["Frequency of Incoming Messages"].values
     cancels = data["Cancellations Rate"].values
@@ -117,28 +127,28 @@ def main():
     for i, ask_price in enumerate(ask_prices, 1):
         price_graph_fig.add_trace(
             go.Scattergl(
-                name=f'Ask {i}',
+                name=f"Ask {i}",
                 yaxis="y1"
             ),
             hf_x=timestamps_graph,
             hf_y=ask_price,
-            hf_marker_color=f'rgb' + str(interpolate_color((230, 31, 7), (255, 255, 255), (i - 1) / len(ask_prices)))
+            hf_marker_color=f"rgb" + str(interpolate_color((230, 31, 7), (255, 255, 255), (i - 1) / len(ask_prices)))
         )
 
     for i, bid_price in enumerate(bid_prices, 1):
         price_graph_fig.add_trace(
             go.Scattergl(
-                name=f'Bid {i}',
+                name=f"Bid {i}",
                 yaxis="y1"
             ),
             hf_x=timestamps_graph,
             hf_y=bid_price,
-            hf_marker_color=f'rgb' + str(interpolate_color((94, 163, 54), (255, 255, 255), (i - 1) / len(bid_prices)))
+            hf_marker_color=f"rgb" + str(interpolate_color((94, 163, 54), (255, 255, 255), (i - 1) / len(bid_prices)))
         )
 
     price_graph_fig.add_trace(
         go.Scattergl(
-            name='Imbalance index',
+            name="Imbalance index",
             yaxis="y2",
             opacity=0.1
         ),
@@ -149,7 +159,7 @@ def main():
 
     price_graph_fig.add_trace(
         go.Scattergl(
-            name='Incoming messages (per sec)',
+            name="Incoming messages (per sec)",
             yaxis="y3",
             opacity=0.25
         ),
@@ -170,23 +180,14 @@ def main():
     )
 
     price_graph_fig.update_layout(
-        title='Price Graph',
-        xaxis={'title': 'Timestamp', "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
-        yaxis={'title': 'Price', 'side': 'left'},
-        yaxis2={'title': 'Imbalance index', 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "range": [-1, 1]},
-        yaxis3={'title': 'Incoming messages (per sec)', 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True},
-        yaxis4={'title': 'Cancellations rate', 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True},
+        title="Price Graph",
+        xaxis={"title": "Timestamp", "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
+        yaxis={"title": "Price", "side": "left"},
+        yaxis2={"title": "Imbalance index", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True, "range": [-1, 1]},
+        yaxis3={"title": "Incoming messages (per sec)", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
+        yaxis4={"title": "Cancellations rate", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-        # ----- For thesis images export -----
-        # title={"text": '', "font": {"size": 48}},
-        # xaxis={'title': {'text': 'Timestamp', 'font': {'size': 36}}, "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels, "tickfont": {"size": 32}},
-        # yaxis={'title': {'text': 'Price', 'font': {'size': 36}}, 'side': 'left', "tickfont": {"size": 32}},
-        # yaxis2={'title': {'text': 'Imbalance index', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "range": [-1, 1], "tickfont": {"size": 32}},
-        # yaxis3={'title': {'text': 'Incoming messages (per sec)', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "tickfont": {"size": 32}},
-        # yaxis4={'title': {'text': 'Cancellations rate', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "tickfont": {"size": 32}},
-        # legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1, "font": {"size": 32}},
-        # ----- For thesis images export -----
-        clickmode='event+select',
+        clickmode="event+select",
         hovermode="x unified"
     )
 
@@ -201,7 +202,7 @@ def main():
             z=aggregated_data,
             x=[f"{i // 3600}:00" for i in range(0, 24 * 3600, time_window_aggregation)],
             y=names,
-            colorscale='Viridis',
+            colorscale="Viridis",
             colorbar=dict(title=metric),
             hoverongaps=False,
             zmin=np.min(aggregated_data),
@@ -211,10 +212,10 @@ def main():
 
     # Update layout
     heatmap_fig.update_layout(
-        title=f'Aggregated {metric} Heatmap',
-        xaxis=dict(title='Time'),
-        yaxis=dict(title='Day/Product'),
-        clickmode='event+select',
+        title=f"{chosen_aggregation} of {metric} Heatmap",
+        xaxis=dict(title="Time"),
+        yaxis=dict(title="Day/Product"),
+        clickmode="event+select",
         hovermode="x unified"
     )
 
@@ -226,12 +227,12 @@ def main():
                     id="price_graph",
                     figure=price_graph_fig,
                     config={
-                        'toImageButtonOptions': {
-                            'format': 'png',
-                            'filename': 'price_graph',
+                        "toImageButtonOptions": {
+                            "format": "png",
+                            "filename": "price_graph",
                             "width": 1920,
                             "height": 1080,
-                            'scale': 3
+                            "scale": 3
                         }
                     }
                 ), type="circle")
@@ -241,17 +242,52 @@ def main():
             "align-items": "center",
         }),
         html.Div([
+            # DropDownMenu of Metrics
+            dcc.Dropdown(
+                id="metric_dropdown",
+                options=[
+                    {"label": "Ask Price", "value": "Ask Price 1"},
+                    {"label": "Bid Price", "value": "Bid Price 1"},
+                    {"label": "Ask Volume", "value": "Ask Volume 1"},
+                    {"label": "Bid Volume", "value": "Bid Volume 1"},
+                    {"label": "Imbalance Index", "value": "Imbalance Index"},
+                    {"label": "Frequency of Incoming Messages", "value": "Frequency of Incoming Messages"},
+                    {"label": "Cancellations Rate", "value": "Cancellations Rate"},
+                    {"label": "High Quoting Activity", "value": "High Quoting Activity"},
+                    {"label": "Unbalanced Quoting", "value": "Unbalanced Quoting"},
+                    {"label": "Low Execution Probability", "value": "Low Execution Probability"},
+                    {"label": "Trades Oppose Quotes", "value": "Trades Oppose Quotes"},
+                    {"label": "Cancels Oppose Trades", "value": "Cancels Oppose Trades"}
+                ],
+                value=metric,
+                clearable=False,
+                style={"width": "50%"}
+            ),
+            # DropDownMenu of Aggregation Functions
+            dcc.Dropdown(
+                id="aggregation_dropdown",
+                options=[
+                    {"label": "Mean", "value": "Mean"},
+                    {"label": "Median", "value": "Median"},
+                    {"label": "Max", "value": "Max"},
+                    {"label": "Min", "value": "Min"},
+                    {"label": "Std", "value": "Std"}
+                ],
+                value=chosen_aggregation,
+                clearable=False,
+                style={"width": "50%"}
+            ),
             dcc.Loading(
                 dcc.Graph(
                     id="heatmap_graph",
                     figure=heatmap_fig,
                     config={
-                        'toImageButtonOptions': {
-                            'format': 'png',
-                            'filename': 'heatmap_graph',
+                        "toImageButtonOptions": {
+                            "format": "png",
+                            "filename": "heatmap_graph",
                             "width": 1920,
                             "height": 1080,
-                            'scale': 3
+                            "scale": 3
                         }
                     }
                 ), type="circle")
@@ -262,9 +298,25 @@ def main():
         })
     ])
 
-    print("Starting server...")
+
+    # Callback to update the heatmap based on the selected metrics and aggregation functions
+    @app.callback(
+        Output("heatmap_graph", "figure"),
+        Input("metric_dropdown", "value"),
+        Input("aggregation_dropdown", "value"),
+        State("heatmap_graph", "figure")
+    )
+    def update_heatmap(selected_metric, selected_aggregation, fig):
+        # Update the heatmap data
+        fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=time_window_aggregation)
+        fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
+        fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
+        return fig
+
+
+    # Run the Dash app
     app.run_server(host="127.0.0.1", port=8080, debug=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
