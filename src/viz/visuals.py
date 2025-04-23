@@ -37,7 +37,7 @@ def load_all_data(level_depth=1):
             names.append(f"{date}_{market_segment_id}_{security}")
             data.append(load_data(date, market_segment_id, security, level_depth=level_depth))
 
-    return data, names
+    return data, np.array(names)
 
 
 def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_window=3600):
@@ -94,13 +94,14 @@ def main():
     }
     time_window_aggregation = 3600
     metric = "Ask Price 1"
+    chosen_data_index = 0
     print("Loading data...")
     # data = load_data("20191202", "688", "4128839", level_depth=level_depth)
     # data_2 = load_data("20210319", "1176", "2299728", level_depth=level_depth)
     # all_data = [data, data_2]
     # names = ["20191202_688_4128839", "20210319_1176_2299728"]
     all_data, names = load_all_data(level_depth=level_depth)
-    data = all_data[0]
+    data = all_data[chosen_data_index]
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
@@ -116,7 +117,7 @@ def main():
     # Convert to 0 - n
     timestamps_graph = list(range(len(timestamps_graph_labels)))
     # Tick every 10000 timestamps
-    tickvals = list(range(0, len(timestamps), 10000))
+    tickvals = list(range(0, len(timestamps), len(timestamps) // 75))
     ticklabels = [timestamps_graph_labels[i] for i in tickvals]
     # Go from HH:MM:SS.nnnnnn to truly HH:MM:SS
     ticklabels = [ts[:8] for ts in ticklabels]
@@ -180,7 +181,7 @@ def main():
     )
 
     price_graph_fig.update_layout(
-        title="Price Graph",
+        title=f"Price Graph for {names[0]}",
         xaxis={"title": "Timestamp", "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
         yaxis={"title": "Price", "side": "left"},
         yaxis2={"title": "Imbalance index", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True, "range": [-1, 1]},
@@ -200,7 +201,7 @@ def main():
     heatmap_fig.add_trace(
         go.Heatmap(
             z=aggregated_data,
-            x=[f"{i // 3600}:00" for i in range(0, 24 * 3600, time_window_aggregation)],
+            x=[f"{i // 3600}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, time_window_aggregation)],
             y=names,
             colorscale="Viridis",
             colorbar=dict(title=metric),
@@ -277,6 +278,20 @@ def main():
                 clearable=False,
                 style={"width": "50%"}
             ),
+            # Time Window for Aggregation
+            dcc.Input(
+                id="time_window_input",
+                type="number",
+                value=time_window_aggregation,
+                min=1,  # Minimum time window is 1 second
+                max=24 * 60 * 60,  # 24 hours in seconds
+                step=1,
+                style={"width": "50%"},
+                placeholder="Time Window (seconds)",
+            ),
+            # Button to update the heatmap
+            html.Button("Apply", id="update_heatmap_button", n_clicks=0),
+            # Heatmap
             dcc.Loading(
                 dcc.Graph(
                     id="heatmap_graph",
@@ -302,16 +317,123 @@ def main():
     # Callback to update the heatmap based on the selected metrics and aggregation functions
     @app.callback(
         Output("heatmap_graph", "figure"),
-        Input("metric_dropdown", "value"),
-        Input("aggregation_dropdown", "value"),
-        State("heatmap_graph", "figure")
+        Output("price_graph", "figure"),
+        Input("update_heatmap_button", "n_clicks"),
+        Input("heatmap_graph", "clickData"),
+        State("metric_dropdown", "value"),
+        State("aggregation_dropdown", "value"),
+        State("time_window_input", "value"),
+        State("heatmap_graph", "figure"),
+        State("price_graph", "figure"),
     )
-    def update_heatmap(selected_metric, selected_aggregation, fig):
+    def update_heatmap(update_heatmap_button, heatmap_click, selected_metric, selected_aggregation, selected_time_window, heatmap_fig, price_fig):
         # Update the heatmap data
-        fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=time_window_aggregation)
-        fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
-        fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
-        return fig
+        if update_heatmap_button:
+            heatmap_fig["data"][0]["x"] = [f"{i // 3600}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, selected_time_window)]
+            heatmap_fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
+            heatmap_fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
+            heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
+
+        # Change the price graph based on the heatmap click
+        if heatmap_click:
+            # Get the clicked point
+            clicked_point = heatmap_click["points"][0]
+            # Get the index of the clicked point
+            clicked_index = np.where(names == clicked_point["y"])[0][0]
+            # Get the data for the clicked point
+            clicked_data = all_data[clicked_index]
+
+            global chosen_data_index
+            chosen_data_index = clicked_index
+
+            timestamps = clicked_data["Time"].values
+            ask_prices = [clicked_data[f"Ask Price {i}"].values for i in range(1, level_depth + 1)]
+            bid_prices = [clicked_data[f"Bid Price {i}"].values for i in range(1, level_depth + 1)]
+            imbalance_indices = clicked_data["Imbalance Index"].values
+            freqs = clicked_data["Frequency of Incoming Messages"].values
+            cancels = clicked_data["Cancellations Rate"].values
+
+            # Convert timestamps to HH:MM:SS format
+            timestamps_graph_labels = [datetime.datetime.fromtimestamp(int(ts) / 1e9).strftime("%H:%M:%S.%f") for ts in timestamps]
+            # Convert to 0 - n
+            timestamps_graph = list(range(len(timestamps_graph_labels)))
+            # Tick every 10000 timestamps
+            tickvals = list(range(0, len(timestamps), len(timestamps) // 75))
+            ticklabels = [timestamps_graph_labels[i] for i in tickvals]
+            # Go from HH:MM:SS.nnnnnn to truly HH:MM:SS
+            ticklabels = [ts[:8] for ts in ticklabels]
+
+            # Price graph
+            price_fig = FigureResampler(go.Figure(), default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
+
+            for i, ask_price in enumerate(ask_prices, 1):
+                price_fig.add_trace(
+                    go.Scattergl(
+                        name=f"Ask {i}",
+                        yaxis="y1"
+                    ),
+                    hf_x=timestamps_graph,
+                    hf_y=ask_price,
+                    hf_marker_color=f"rgb" + str(interpolate_color((230, 31, 7), (255, 255, 255), (i - 1) / len(ask_prices)))
+                )
+
+            for i, bid_price in enumerate(bid_prices, 1):
+                price_fig.add_trace(
+                    go.Scattergl(
+                        name=f"Bid {i}",
+                        yaxis="y1"
+                    ),
+                    hf_x=timestamps_graph,
+                    hf_y=bid_price,
+                    hf_marker_color=f"rgb" + str(interpolate_color((94, 163, 54), (255, 255, 255), (i - 1) / len(bid_prices)))
+                )
+
+            price_fig.add_trace(
+                go.Scattergl(
+                    name="Imbalance index",
+                    yaxis="y2",
+                    opacity=0.1
+                ),
+                hf_x=timestamps_graph,
+                hf_y=imbalance_indices,
+                hf_marker_color="rgb(0, 0, 255)"
+            )
+
+            price_fig.add_trace(
+                go.Scattergl(
+                    name="Incoming messages (per sec)",
+                    yaxis="y3",
+                    opacity=0.25
+                ),
+                hf_x=timestamps_graph,
+                hf_y=freqs,
+                hf_marker_color="rgb(255, 0, 215)"
+            )
+
+            price_fig.add_trace(
+                go.Scattergl(
+                    name="Cancellations rate",
+                    yaxis="y4",
+                    opacity=0.25
+                ),
+                hf_x=timestamps_graph,
+                hf_y=cancels,
+                hf_marker_color="rgb(255, 215, 0)"
+            )
+
+            price_fig.update_layout(
+                title=f"Price Graph for {names[0]}",
+                xaxis={"title": "Timestamp", "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
+                yaxis={"title": "Price", "side": "left"},
+                yaxis2={"title": "Imbalance index", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True, "range": [-1, 1]},
+                yaxis3={"title": "Incoming messages (per sec)", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
+                yaxis4={"title": "Cancellations rate", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
+                legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+                clickmode="event+select",
+                hovermode="x unified"
+            )
+
+        return heatmap_fig, price_fig
 
 
     # Run the Dash app
