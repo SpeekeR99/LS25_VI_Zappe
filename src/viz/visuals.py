@@ -96,12 +96,11 @@ def main():
     metric = "Ask Price 1"
     chosen_data_index = 0
     print("Loading data...")
-    # data = load_data("20191202", "688", "4128839", level_depth=level_depth)
-    # data_2 = load_data("20210319", "1176", "2299728", level_depth=level_depth)
-    # all_data = [data, data_2]
-    # names = ["20191202_688_4128839", "20210319_1176_2299728"]
-    all_data, names = load_all_data(level_depth=level_depth)
-    data = all_data[chosen_data_index]
+    data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
+    all_data = [data]
+    names = ["20210319_1176_2299728"]
+    # all_data, names = load_all_data(level_depth=level_depth)
+    # data = all_data[chosen_data_index]
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
@@ -178,6 +177,21 @@ def main():
         hf_x=timestamps_graph,
         hf_y=cancels,
         hf_marker_color="rgb(255, 215, 0)"
+    )
+
+    price_graph_fig.add_trace(  # Highlight trace for the future hovering on the HeatMap
+        go.Scattergl(
+            name="Highlight",
+            yaxis="y1",
+            mode="lines",
+            fill="toself",
+            line=dict(width=2, color="rgba(25, 25, 100, 1)"),
+            fillcolor="rgba(185, 215, 255, 0.3)",
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        hf_x=[],
+        hf_y=[],
     )
 
     price_graph_fig.update_layout(
@@ -314,19 +328,21 @@ def main():
     ])
 
 
-    # Callback to update the heatmap based on the selected metrics and aggregation functions
     @app.callback(
         Output("heatmap_graph", "figure"),
         Output("price_graph", "figure"),
         Input("update_heatmap_button", "n_clicks"),
         Input("heatmap_graph", "clickData"),
+        Input("heatmap_graph", "hoverData"),
         State("metric_dropdown", "value"),
         State("aggregation_dropdown", "value"),
         State("time_window_input", "value"),
         State("heatmap_graph", "figure"),
         State("price_graph", "figure"),
     )
-    def update_heatmap(update_heatmap_button, heatmap_click, selected_metric, selected_aggregation, selected_time_window, heatmap_fig, price_fig):
+    def update_heatmap(update_heatmap_button, heatmap_click, heatmap_hover, selected_metric, selected_aggregation, selected_time_window, heatmap_fig, price_fig):
+        nonlocal chosen_data_index, timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, timestamps_graph_labels, timestamps_graph, tickvals, ticklabels
+
         # Update the heatmap data
         if update_heatmap_button:
             heatmap_fig["data"][0]["x"] = [f"{i // 3600}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, selected_time_window)]
@@ -343,7 +359,6 @@ def main():
             # Get the data for the clicked point
             clicked_data = all_data[clicked_index]
 
-            global chosen_data_index
             chosen_data_index = clicked_index
 
             timestamps = clicked_data["Time"].values
@@ -421,6 +436,21 @@ def main():
                 hf_marker_color="rgb(255, 215, 0)"
             )
 
+            price_graph_fig.add_trace(  # Highlight trace for the future hovering on the HeatMap
+                go.Scattergl(
+                    name="Highlight",
+                    yaxis="y1",
+                    mode="lines",
+                    fill="toself",
+                    line=dict(width=0),
+                    fillcolor="rgba(200, 255, 200, 0.3)",
+                    hoverinfo="skip",
+                    showlegend=False,
+                ),
+                hf_x=[],
+                hf_y=[],
+            )
+
             price_fig.update_layout(
                 title=f"Price Graph for {names[0]}",
                 xaxis={"title": "Timestamp", "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
@@ -432,6 +462,52 @@ def main():
                 clickmode="event+select",
                 hovermode="x unified"
             )
+
+        if heatmap_hover:
+            hovered_label  = heatmap_hover["points"][0]["x"]
+
+            h, m = map(int, hovered_label.split(":"))
+            hovered_sec = h * 3600 + m * 60
+
+            # Calculate start and end of the range (e.g., ±30 min = 1800 sec)
+            highlight_start = hovered_sec
+            highlight_end = hovered_sec + selected_time_window
+
+            def find_index_for_sec(sec, ts_array):
+                for i, ts in enumerate(ts_array):
+                    if ts >= sec:
+                        return i
+                return len(ts_array) - 1
+
+            timestamps_series = pd.Series(pd.to_datetime(timestamps, unit="ns"))
+            seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
+            x0 = find_index_for_sec(highlight_start, seconds_since_midnight)
+            x1 = find_index_for_sec(highlight_end, seconds_since_midnight)
+
+            y_min = np.nanmin(np.array(bid_prices + ask_prices))
+            y_max = np.nanmax(np.array(bid_prices + ask_prices))
+
+            # Define rectangle corners
+            highlight_x = [
+                timestamps_graph[x0],  # Top-left
+                timestamps_graph[x1],  # Top-right
+                timestamps_graph[x1],  # Bottom-right
+                timestamps_graph[x0],  # Bottom-left
+                timestamps_graph[x0],  # Closing the path
+            ]
+
+            highlight_y = [
+                y_max,  # Top-left
+                y_max,  # Top-right
+                y_min,  # Bottom-right
+                y_min,  # Bottom-left
+                y_max,  # Closing the path
+            ]
+
+            for trace in price_fig["data"]:
+                if "Highlight" in trace["name"]:
+                    trace["x"] = highlight_x
+                    trace["y"] = highlight_y
 
         return heatmap_fig, price_fig
 
