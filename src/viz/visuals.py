@@ -329,26 +329,14 @@ def main():
 
 
     @app.callback(
-        Output("heatmap_graph", "figure"),
         Output("price_graph", "figure"),
-        Input("update_heatmap_button", "n_clicks"),
         Input("heatmap_graph", "clickData"),
         Input("heatmap_graph", "hoverData"),
-        State("metric_dropdown", "value"),
-        State("aggregation_dropdown", "value"),
         State("time_window_input", "value"),
-        State("heatmap_graph", "figure"),
         State("price_graph", "figure"),
     )
-    def update_heatmap(update_heatmap_button, heatmap_click, heatmap_hover, selected_metric, selected_aggregation, selected_time_window, heatmap_fig, price_fig):
+    def update_price_graph(heatmap_click, heatmap_hover, selected_time_window, price_fig):
         nonlocal chosen_data_index, timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, timestamps_graph_labels, timestamps_graph, tickvals, ticklabels
-
-        # Update the heatmap data
-        if update_heatmap_button:
-            heatmap_fig["data"][0]["x"] = [f"{i // 3600}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, selected_time_window)]
-            heatmap_fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
-            heatmap_fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
-            heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
 
         # Change the price graph based on the heatmap click
         if heatmap_click:
@@ -464,7 +452,7 @@ def main():
             )
 
         if heatmap_hover:
-            hovered_label  = heatmap_hover["points"][0]["x"]
+            hovered_label = heatmap_hover["points"][0]["x"]
 
             h, m = map(int, hovered_label.split(":"))
             hovered_sec = h * 3600 + m * 60
@@ -509,7 +497,28 @@ def main():
                     trace["x"] = highlight_x
                     trace["y"] = highlight_y
 
-        return heatmap_fig, price_fig
+        return price_fig
+
+
+    @app.callback(
+        Output("heatmap_graph", "figure"),
+        Input("update_heatmap_button", "n_clicks"),
+        State("metric_dropdown", "value"),
+        State("aggregation_dropdown", "value"),
+        State("time_window_input", "value"),
+        State("heatmap_graph", "figure"),
+    )
+    def update_heatmap(update_heatmap_button,  selected_metric, selected_aggregation, selected_time_window, heatmap_fig):
+        nonlocal chosen_data_index, timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, timestamps_graph_labels, timestamps_graph, tickvals, ticklabels
+
+        # Update the heatmap data
+        if update_heatmap_button:
+            heatmap_fig["data"][0]["x"] = [f"{i // 3600}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, selected_time_window)]
+            heatmap_fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
+            heatmap_fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
+            heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
+
+        return heatmap_fig
 
 
     # Run the Dash app
