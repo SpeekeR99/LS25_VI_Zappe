@@ -73,7 +73,7 @@ def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_win
     return aggregated_data
 
 
-def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names, how_many_x_ticks=75):
+def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, name, how_many_x_ticks=75):
     # Convert timestamps to HH:MM:SS format
     timestamps_graph_labels = [datetime.datetime.fromtimestamp(int(ts) / 1e9).strftime("%H:%M:%S.%f") for ts in timestamps]
     # Convert to 0 - n
@@ -161,7 +161,7 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
     )
 
     price_graph_fig.update_layout(
-        title=f"Price Graph for {names[0]}",
+        title=f"{name}",
         xaxis={"title": "Timestamp", "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels},
         yaxis={"title": "Price", "side": "left"},
         yaxis2={"title": "Imbalance index", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True, "range": [-1, 1]},
@@ -169,7 +169,8 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
         yaxis4={"title": "Cancellations rate", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
         clickmode="event+select",
-        hovermode="x unified"
+        hovermode="x unified",
+        plot_bgcolor="#f9f9f9",
     )
 
     return price_graph_fig
@@ -206,7 +207,7 @@ def main():
     cancels = data["Cancellations Rate"].values
 
     # Price graph
-    price_graph_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names)
+    price_graph_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[0])
     price_graph_fig.register_update_graph_callback(app=app, graph_id="price_graph")
 
     # Heatmap
@@ -219,7 +220,7 @@ def main():
             x=[f"{i // 3600:02d}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, time_window_aggregation)],
             y=names,
             colorscale="Viridis",
-            colorbar=dict(title=metric),
+            colorbar=dict(),
             hoverongaps=False,
             zmin=np.min(aggregated_data),
             zmax=np.max(aggregated_data),
@@ -228,15 +229,16 @@ def main():
 
     # Update layout
     heatmap_fig.update_layout(
-        title=f"{chosen_aggregation} of {metric} Heatmap",
+        title=f"{chosen_aggregation} of {metric} Heatmap (Normalized Values)",
         xaxis=dict(title="Time"),
         yaxis=dict(title="Day/Product"),
         clickmode="event+select",
-        hovermode="x unified"
+        hovermode="x unified",
+        plot_bgcolor="#f9f9f9",
     )
 
-    # HTML webpage of the visualizations
     app.layout = html.Div([
+        # Full-width Price Graph
         html.Div([
             dcc.Loading(
                 dcc.Graph(
@@ -251,93 +253,139 @@ def main():
                             "scale": 3
                         }
                     }
-                ), type="circle")
+                ),
+                type="circle"
+            )
         ], style={
-            "display": "block",
-            "justify-content": "center",
-            "align-items": "center",
+            "marginBottom": "1rem",
+            "boxShadow": "0 4px 8px rgba(0,0,0,0.1)",
+            "borderRadius": "10px",
+            "padding": "0.5rem",
+            "backgroundColor": "#f9f9f9"
         }),
+
+        # FLEX CONTAINER: Heatmap + Settings
         html.Div([
-            # DropDownMenu of Metrics
-            dcc.Dropdown(
-                id="metric_dropdown",
-                options=[
-                    {"label": "Ask Price", "value": "Ask Price 1"},
-                    {"label": "Bid Price", "value": "Bid Price 1"},
-                    {"label": "Ask Volume", "value": "Ask Volume 1"},
-                    {"label": "Bid Volume", "value": "Bid Volume 1"},
-                    {"label": "Imbalance Index", "value": "Imbalance Index"},
-                    {"label": "Frequency of Incoming Messages", "value": "Frequency of Incoming Messages"},
-                    {"label": "Cancellations Rate", "value": "Cancellations Rate"},
-                    {"label": "High Quoting Activity", "value": "High Quoting Activity"},
-                    {"label": "Unbalanced Quoting", "value": "Unbalanced Quoting"},
-                    {"label": "Low Execution Probability", "value": "Low Execution Probability"},
-                    {"label": "Trades Oppose Quotes", "value": "Trades Oppose Quotes"},
-                    {"label": "Cancels Oppose Trades", "value": "Cancels Oppose Trades"}
-                ],
-                value=metric,
-                clearable=False,
-                style={"width": "50%"}
-            ),
-            # DropDownMenu of Aggregation Functions
-            dcc.Dropdown(
-                id="aggregation_dropdown",
-                options=[
-                    {"label": "Mean", "value": "Mean"},
-                    {"label": "Median", "value": "Median"},
-                    {"label": "Max", "value": "Max"},
-                    {"label": "Min", "value": "Min"},
-                    {"label": "Std", "value": "Std"}
-                ],
-                value=chosen_aggregation,
-                clearable=False,
-                style={"width": "50%"}
-            ),
-            # Time Window for Aggregation
-            dcc.Input(
-                id="time_window_input",
-                type="number",
-                value=time_window_aggregation,
-                min=1,  # Minimum time window is 1 second
-                max=24 * 60 * 60,  # 24 hours in seconds
-                step=1,
-                style={"width": "50%"},
-                placeholder="Time Window (seconds)",
-            ),
-            # Button to update the heatmap
-            html.Button("Apply", id="update_heatmap_button", n_clicks=0),
-            # Button to hide hovers
-            html.Button("Hide Hovers", id="hide_hovers_button", n_clicks=0),
-            # Heatmap
-            dcc.Loading(
-                dcc.Graph(
-                    id="heatmap_graph",
-                    figure=heatmap_fig,
-                    config={
-                        "toImageButtonOptions": {
-                            "format": "png",
-                            "filename": "heatmap_graph",
-                            "width": 1920,
-                            "height": 1080,
-                            "scale": 3
+            # SETTINGS - LEFT COLUMN
+            html.Div([
+                html.H4("Heatmap Settings", style={"marginBottom": "1rem"}),
+
+                dcc.Dropdown(
+                    id="metric_dropdown",
+                    options=[{"label": label, "value": value} for label, value in [
+                        ("Ask Price", "Ask Price 1"),
+                        ("Bid Price", "Bid Price 1"),
+                        ("Ask Volume", "Ask Volume 1"),
+                        ("Bid Volume", "Bid Volume 1"),
+                        ("Imbalance Index", "Imbalance Index"),
+                        ("Frequency of Incoming Messages", "Frequency of Incoming Messages"),
+                        ("Cancellations Rate", "Cancellations Rate"),
+                        ("High Quoting Activity", "High Quoting Activity"),
+                        ("Unbalanced Quoting", "Unbalanced Quoting"),
+                        ("Low Execution Probability", "Low Execution Probability"),
+                        ("Trades Oppose Quotes", "Trades Oppose Quotes"),
+                        ("Cancels Oppose Trades", "Cancels Oppose Trades")
+                    ]],
+                    value=metric,
+                    clearable=False,
+                    style={"marginBottom": "1rem"}
+                ),
+
+                dcc.Dropdown(
+                    id="aggregation_dropdown",
+                    options=[{"label": x, "value": x} for x in ["Mean", "Median", "Max", "Min", "Std"]],
+                    value=chosen_aggregation,
+                    clearable=False,
+                    style={"marginBottom": "1rem"}
+                ),
+
+                dcc.Input(
+                    id="time_window_input",
+                    type="number",
+                    value=time_window_aggregation,
+                    min=1,
+                    max=86400,
+                    step=1,
+                    placeholder="Time Window (seconds)",
+                    style={"width": "100%", "marginBottom": "1rem"}
+                ),
+
+                html.Div([
+                    html.Button("Apply", id="update_heatmap_button", n_clicks=0, style={
+                        "marginBottom": "5rem",
+                        "width": "100%",
+                        "padding": "0.75rem 1rem",
+                        "fontSize": "1rem",
+                        "fontWeight": "bold",
+                        "color": "#fff",
+                        "backgroundColor": "#007BFF",  # Modern blue
+                        "border": "none",
+                        "borderRadius": "8px",
+                        "boxShadow": "0 4px 6px rgba(0, 123, 255, 0.3)",
+                        "cursor": "pointer",
+                        "transition": "background-color 0.3s ease-in-out",
+                    }),
+                    html.Button("Hide Hovers", id="hide_hovers_button", n_clicks=0, style={"width": "100%"})
+                ], style={
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "alignItems": "stretch",  # makes buttons fill width if desired
+                    "marginTop": "1rem",
+                })
+            ], style={
+                "flex": "0 0 300px",  # Fixed width
+                "padding": "0.5rem",
+                "boxShadow": "0 4px 8px rgba(0,0,0,0.1)",
+                "borderRadius": "10px",
+                "backgroundColor": "#ffffff",
+                "minWidth": "250px"
+            }),
+
+            # HEATMAP - RIGHT COLUMN
+            html.Div([
+                dcc.Loading(
+                    dcc.Graph(
+                        id="heatmap_graph",
+                        figure=heatmap_fig,
+                        config={
+                            "toImageButtonOptions": {
+                                "format": "png",
+                                "filename": "heatmap_graph",
+                                "width": 1920,
+                                "height": 1080,
+                                "scale": 3
+                            }
                         }
-                    }
-                ), type="circle")
+                    ),
+                    type="circle"
+                )
+            ], style={
+                "flex": "1",
+                "marginLeft": "1rem",
+                "padding": "0.5rem",
+                "boxShadow": "0 4px 8px rgba(0,0,0,0.1)",
+                "borderRadius": "10px",
+                "backgroundColor": "#f9f9f9",
+                "minWidth": "0"  # important to prevent overflow
+            })
         ], style={
-            "display": "block",
-            "justify-content": "center",
-            "align-items": "center",
-        })
-    ])
+            "display": "flex",
+            "flexWrap": "nowrap",  # force side-by-side
+            "alignItems": "flex-start",
+            "gap": "1rem",
+            "marginBottom": "1rem"
+        }),
+    ], style={"padding": "0.5rem", "fontFamily": "Arial, sans-serif", "backgroundColor": "#f0f2f5"})
 
     last_hover_label = None
     last_heatmap_click_count = None
     last_hide_hovers_click_count = None
     hide_hovers = False
 
-
     @app.callback(
         Output("price_graph", "figure"),
+        Output("hide_hovers_button", "children"),
+        Output("hide_hovers_button", "style"),
         Input("heatmap_graph", "clickData"),
         Input("heatmap_graph", "hoverData"),
         Input("hide_hovers_button", "n_clicks"),
@@ -350,6 +398,16 @@ def main():
         if hide_button_clicks and last_hide_hovers_click_count != hide_button_clicks:
             last_hide_hovers_click_count = hide_button_clicks
             hide_hovers = not hide_hovers
+
+        btn_text = "Show Hovers" if hide_hovers else "Hide Hovers"
+        btn_style = {
+            "padding": "0.5rem 1rem",
+            "borderRadius": "6px",
+            "border": "none",
+            "cursor": "pointer",
+            "backgroundColor": "#e0e0e0" if not hide_hovers else "#4caf50",
+            "color": "#000" if not hide_hovers else "#fff"
+        }
 
         # Change the price graph based on the heatmap click
         if heatmap_click and last_heatmap_click_count != heatmap_click:
@@ -369,7 +427,7 @@ def main():
             cancels = clicked_data["Cancellations Rate"].values
 
             # Price graph
-            price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names)
+            price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index])
 
             last_hover_label = None  # Click resets the hover as well
 
@@ -379,7 +437,7 @@ def main():
                     trace["x"] = []
                     trace["y"] = []
 
-            return price_fig
+            return price_fig, btn_text, btn_style
 
         if heatmap_hover and last_hover_label != heatmap_hover:
             hovered_label = heatmap_hover["points"][0]["x"]
@@ -429,7 +487,7 @@ def main():
                     trace["x"] = highlight_x
                     trace["y"] = highlight_y
 
-        return price_fig
+        return price_fig, btn_text, btn_style
 
 
     @app.callback(
@@ -445,8 +503,7 @@ def main():
         if update_heatmap_button:
             heatmap_fig["data"][0]["x"] = [f"{i // 3600:02d}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, selected_time_window)]
             heatmap_fig["data"][0]["z"] = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
-            heatmap_fig["data"][0]["colorbar"]["title"]["text"] = selected_metric
-            heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap"
+            heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap (Normalized Values)"
 
         return heatmap_fig
 
