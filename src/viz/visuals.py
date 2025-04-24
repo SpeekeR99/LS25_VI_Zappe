@@ -347,6 +347,7 @@ def main():
                     dcc.Graph(
                         id="heatmap_graph",
                         figure=heatmap_fig,
+                        clear_on_unhover=True,
                         config={
                             "toImageButtonOptions": {
                                 "format": "png",
@@ -373,7 +374,6 @@ def main():
             "flexWrap": "nowrap",  # force side-by-side
             "alignItems": "flex-start",
             "gap": "1rem",
-            "marginBottom": "1rem"
         }),
     ], style={"padding": "0.5rem", "fontFamily": "Arial, sans-serif", "backgroundColor": "#f0f2f5"})
 
@@ -487,6 +487,13 @@ def main():
                     trace["x"] = highlight_x
                     trace["y"] = highlight_y
 
+        if heatmap_hover is None:
+            "User stopped hovering"
+            for trace in price_fig["data"]:
+                if "Highlight" in trace["name"]:
+                    trace["x"] = []
+                    trace["y"] = []
+
         return price_fig, btn_text, btn_style
 
 
@@ -509,7 +516,7 @@ def main():
 
 
     # Run the Dash app
-    app.run_server(host="127.0.0.1", port=8080, debug=False)
+    app.run(host="127.0.0.1", port=8080, debug=False)
 
 
 if __name__ == "__main__":
