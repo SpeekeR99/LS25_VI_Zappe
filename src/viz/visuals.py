@@ -191,11 +191,11 @@ def main():
     time_window_aggregation = 3600
     metric = "Ask Price 1"
     print("Loading data...")
-    # data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
-    # all_data = [data]
-    # names = ["20210319_1176_2299728"]
-    all_data, names = load_all_data(level_depth=level_depth)
-    data = all_data[0]
+    data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
+    all_data = [data]
+    names = ["20210319_1176_2299728"]
+    # all_data, names = load_all_data(level_depth=level_depth)
+    # data = all_data[0]
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
@@ -270,6 +270,7 @@ def main():
             html.Div([
                 html.H4("Heatmap Settings", style={"marginBottom": "1rem"}),
 
+                html.P("Select a metric to visualize market microstructure behavior:", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
                 dcc.Dropdown(
                     id="metric_dropdown",
                     options=[{"label": label, "value": value} for label, value in [
@@ -291,6 +292,7 @@ def main():
                     style={"marginBottom": "1rem"}
                 ),
 
+                html.P("Select an aggregation function:", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
                 dcc.Dropdown(
                     id="aggregation_dropdown",
                     options=[{"label": x, "value": x} for x in ["Mean", "Median", "Max", "Min", "Std"]],
@@ -299,6 +301,7 @@ def main():
                     style={"marginBottom": "1rem"}
                 ),
 
+                html.P("Select a time window for the heatmap (in seconds):", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
                 dcc.Input(
                     id="time_window_input",
                     type="number",
@@ -310,28 +313,20 @@ def main():
                     style={"width": "100%", "marginBottom": "1rem"}
                 ),
 
-                html.Div([
-                    html.Button("Apply", id="update_heatmap_button", n_clicks=0, style={
-                        "marginBottom": "5rem",
-                        "width": "100%",
-                        "padding": "0.75rem 1rem",
-                        "fontSize": "1rem",
-                        "fontWeight": "bold",
-                        "color": "#fff",
-                        "backgroundColor": "#007BFF",  # Modern blue
-                        "border": "none",
-                        "borderRadius": "8px",
-                        "boxShadow": "0 4px 6px rgba(0, 123, 255, 0.3)",
-                        "cursor": "pointer",
-                        "transition": "background-color 0.3s ease-in-out",
-                    }),
-                    html.Button("Hide Hovers", id="hide_hovers_button", n_clicks=0, style={"width": "100%"})
-                ], style={
-                    "display": "flex",
-                    "flexDirection": "column",
-                    "alignItems": "stretch",  # makes buttons fill width if desired
-                    "marginTop": "1rem",
-                })
+                html.Button("Apply", id="update_heatmap_button", n_clicks=0, style={
+                    "marginTop": "4rem",
+                    "width": "100%",
+                    "padding": "0.75rem 1rem",
+                    "fontSize": "1rem",
+                    "fontWeight": "bold",
+                    "color": "#fff",
+                    "backgroundColor": "#007BFF",  # Modern blue
+                    "border": "none",
+                    "borderRadius": "8px",
+                    "boxShadow": "0 4px 6px rgba(0, 123, 255, 0.3)",
+                    "cursor": "pointer",
+                    "transition": "background-color 0.3s ease-in-out",
+                }),
             ], style={
                 "flex": "0 0 300px",  # Fixed width
                 "padding": "0.5rem",
@@ -379,35 +374,16 @@ def main():
 
     last_hover_label = None
     last_heatmap_click_count = None
-    last_hide_hovers_click_count = None
-    hide_hovers = False
 
     @app.callback(
         Output("price_graph", "figure"),
-        Output("hide_hovers_button", "children"),
-        Output("hide_hovers_button", "style"),
         Input("heatmap_graph", "clickData"),
         Input("heatmap_graph", "hoverData"),
-        Input("hide_hovers_button", "n_clicks"),
         State("time_window_input", "value"),
         State("price_graph", "figure"),
     )
-    def update_price_graph(heatmap_click, heatmap_hover, hide_button_clicks, selected_time_window, price_fig):
-        nonlocal timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, last_heatmap_click_count, last_hover_label, last_hide_hovers_click_count, hide_hovers
-
-        if hide_button_clicks and last_hide_hovers_click_count != hide_button_clicks:
-            last_hide_hovers_click_count = hide_button_clicks
-            hide_hovers = not hide_hovers
-
-        btn_text = "Show Hovers" if hide_hovers else "Hide Hovers"
-        btn_style = {
-            "padding": "0.5rem 1rem",
-            "borderRadius": "6px",
-            "border": "none",
-            "cursor": "pointer",
-            "backgroundColor": "#e0e0e0" if not hide_hovers else "#4caf50",
-            "color": "#000" if not hide_hovers else "#fff"
-        }
+    def update_price_graph(heatmap_click, heatmap_hover, selected_time_window, price_fig):
+        nonlocal timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, last_heatmap_click_count, last_hover_label
 
         # Change the price graph based on the heatmap click
         if heatmap_click and last_heatmap_click_count != heatmap_click:
@@ -430,14 +406,6 @@ def main():
             price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index])
 
             last_hover_label = None  # Click resets the hover as well
-
-        if hide_hovers:
-            for trace in price_fig["data"]:
-                if "Highlight" in trace["name"]:
-                    trace["x"] = []
-                    trace["y"] = []
-
-            return price_fig, btn_text, btn_style
 
         if heatmap_hover and last_hover_label != heatmap_hover:
             hovered_label = heatmap_hover["points"][0]["x"]
@@ -494,7 +462,7 @@ def main():
                     trace["x"] = []
                     trace["y"] = []
 
-        return price_fig, btn_text, btn_style
+        return price_fig
 
 
     @app.callback(
