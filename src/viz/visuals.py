@@ -6,6 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pandas as pd
 import datetime
+import copy
 
 import plotly.graph_objects as go
 import plotly_resampler
@@ -211,10 +212,6 @@ def main():
     freqs = data["Frequency of Incoming Messages"].values
     cancels = data["Cancellations Rate"].values
 
-    # Price graph
-    price_graph_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[0])
-    price_graph_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Automatic Resampling
-
     # Heatmap
     heatmap_fig = go.Figure()
 
@@ -236,8 +233,8 @@ def main():
     # Update layout
     heatmap_fig.update_layout(
         title=f"{chosen_aggregation} of {metric} Heatmap (Normalized Values)",
-        xaxis=dict(title="Time", range=[-0.5, day_sec / time_window_aggregation -0.5]),
-        yaxis=dict(title="Day/Product"),
+        xaxis={"title": "Time"},
+        yaxis={"title": "Day/Product"},
         clickmode="event+select",
         hovermode="x unified",
         plot_bgcolor="#f9f9f9",
@@ -249,7 +246,7 @@ def main():
             dcc.Loading(
                 dcc.Graph(
                     id="price_graph",
-                    figure=price_graph_fig,
+                    figure=go.Figure(),  # When I had a real figure here, the reset axes button was buggy...
                     config={
                         "toImageButtonOptions": {
                             "format": "png",
@@ -436,6 +433,7 @@ def main():
 
             # Price graph
             price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index])
+            price_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Resampler callback
 
             last_hover_label = None  # Click resets the hover as well
             updated = True
