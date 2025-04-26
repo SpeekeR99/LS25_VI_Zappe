@@ -213,7 +213,7 @@ def main():
 
     # Price graph
     price_graph_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[0])
-    price_graph_fig.register_update_graph_callback(app=app, graph_id="price_graph")
+    price_graph_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Automatic Resampling
 
     # Heatmap
     heatmap_fig = go.Figure()
@@ -232,10 +232,11 @@ def main():
         )
     )
 
+    day_sec = 60 * 60 * 24
     # Update layout
     heatmap_fig.update_layout(
         title=f"{chosen_aggregation} of {metric} Heatmap (Normalized Values)",
-        xaxis=dict(title="Time", range=[0, 0]),
+        xaxis=dict(title="Time", range=[-0.5, day_sec / time_window_aggregation -0.5]),
         yaxis=dict(title="Day/Product"),
         clickmode="event+select",
         hovermode="x unified",
@@ -275,7 +276,7 @@ def main():
             html.Div([
                 html.H4("Heatmap Settings", style={"marginBottom": "1rem"}),
 
-                html.P("Select a metric to visualize market microstructure behavior:", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
+                html.P("Select a metric:", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
                 dcc.Dropdown(
                     id="metric_dropdown",
                     options=[{"label": label, "value": value} for label, value in [
@@ -381,6 +382,7 @@ def main():
     last_hover_label = None
     last_heatmap_click_count = None
 
+
     @app.callback(
         Output("metric_description", "children"),
         Input("metric_dropdown", "value")
@@ -401,6 +403,7 @@ def main():
             "Cancels Oppose Trades": "Binary. 1 if the trade is on the opposite side of the more recently canceled side, 0 otherwise."
         }
         return descriptions[selected_metric] if selected_metric in descriptions else "No description available."
+
 
     @app.callback(
         Output("price_graph", "figure"),
@@ -498,13 +501,12 @@ def main():
 
 
     @app.callback(
-        Output("heatmap_graph", "figure", allow_duplicate=True),
+        Output("heatmap_graph", "figure"),
         Input("update_heatmap_button", "n_clicks"),
         State("metric_dropdown", "value"),
         State("aggregation_dropdown", "value"),
         State("time_window_input", "value"),
         State("heatmap_graph", "figure"),
-        prevent_initial_call=True
     )
     def update_heatmap(update_heatmap_button,  selected_metric, selected_aggregation, selected_time_window, heatmap_fig):
         if not update_heatmap_button:
@@ -520,59 +522,6 @@ def main():
         heatmap_fig["data"][0]["z"] = new_z
         heatmap_fig["layout"]["title"]["text"] = f"{selected_aggregation} of {selected_metric} Heatmap (Normalized Values)"
 
-        return heatmap_fig
-
-
-    @app.callback(
-        Output("heatmap_graph", "figure", allow_duplicate=True),
-        Input("price_graph", "relayoutData"),
-        State("heatmap_graph", "figure"),
-        prevent_initial_call=True
-    )
-    def sync_heatmap_zoom(price_relayout, heatmap_fig):
-        global timestamps_graph_labels
-
-        # If there's no labels, return no update
-        if timestamps_graph_labels is None:
-            return dash.no_update
-
-        if price_relayout is None:
-            price_relayout = {"xaxis.range": [0, len(timestamps_graph_labels) - 1]}
-
-        # Get the current x-range from the price graph zoom
-        x0 = price_relayout.get("xaxis.range[0]", 0)
-        x1 = price_relayout.get("xaxis.range[1]", len(timestamps_graph_labels) - 1)
-
-        # Convert x-range to corresponding timestamps
-        t0 = timestamps_graph_labels[int(x0)]
-        t1 = timestamps_graph_labels[int(x1)]
-
-        # Split time into hours, minutes, and seconds
-        t0_parts = t0.split(":")
-        t1_parts = t1.split(":")
-
-        hour0, minute0, second0 = int(t0_parts[0]), int(t0_parts[1]), int(t0_parts[2].split(".")[0])
-        hour1, minute1, second1 = int(t1_parts[0]), int(t1_parts[1]), int(t1_parts[2].split(".")[0])
-
-        t0_sec = hour0 * 3600 + minute0 * 60 + second0
-        t1_sec = hour1 * 3600 + minute1 * 60 + second1
-
-        # Get heatmap x-axis data
-        heatmap_x = heatmap_fig["data"][0]["x"]
-        heatmap_sec = [int(x.split(":")[0]) * 3600 + int(x.split(":")[1]) * 60 for x in heatmap_x]
-
-        # Find closest times in heatmap
-        t0_index = max(i for i, sec in enumerate(heatmap_sec) if sec <= t0_sec)
-        t1_index = min(i for i, sec in enumerate(heatmap_sec) if sec >= t1_sec)
-
-        t0_index = round(max(0, min(t0_index, len(heatmap_sec) - 1)) - 0.5, 3)
-        t1_index = round(max(0, min(t1_index, len(heatmap_sec) - 1)) - 0.5, 3)
-
-        # Check the current range to avoid redundant updates
-        if heatmap_fig["layout"]["xaxis"]["range"] == [t0_index, t1_index]:
-            return dash.no_update
-
-        heatmap_fig["layout"]["xaxis"]["range"] = [t0_index, t1_index]
         return heatmap_fig
 
 
