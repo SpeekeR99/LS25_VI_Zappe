@@ -42,7 +42,7 @@ def load_all_data(level_depth=1):
             names.append(f"{date}_{market_segment_id}_{security}")
             data.append(load_data(date, market_segment_id, security, level_depth=level_depth))
 
-    return data, np.array(names)
+    return data, names
 
 
 def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_window=3600):
