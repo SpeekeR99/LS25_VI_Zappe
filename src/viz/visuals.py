@@ -492,7 +492,10 @@ def main():
             x1 = find_index_for_sec(highlight_end)
 
             # Find the min and max y values for the highlight
-            prices = np.array(bid_prices + ask_prices)
+            if bid_prices is None or ask_prices is None:  # Fail-safe check
+                prices = np.array([0, 1])
+            else:
+                prices = np.array(bid_prices + ask_prices)
             y_min = np.nanmin(prices)
             y_max = np.nanmax(prices)
 
