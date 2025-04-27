@@ -538,6 +538,7 @@ def main():
         time_window_aggregation = selected_time_window
 
         updated = False
+        heatmap_fig = go.Figure(heatmap_fig)
 
         if update_heatmap_button and last_update_heatmap_click_count != update_heatmap_button:
             last_update_heatmap_click_count = update_heatmap_button
@@ -545,38 +546,22 @@ def main():
             new_x = [f"{int(i // 3600):02d}:{int(i % 3600 // 60):02d}" for i in range(0, 24 * 3600, selected_time_window)]
             new_z = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
 
-            if new_x == heatmap_fig["data"][0]["x"] and np.array_equal(new_z, heatmap_fig["data"][0]["z"]):
-                heatmap_fig = go.Figure(heatmap_fig)  # No change
-            else:
+            if new_x != heatmap_fig["data"][0]["x"] or not np.array_equal(new_z, heatmap_fig["data"][0]["z"]):
                 updated = True
-                heatmap_fig = go.Figure()
-
-                # Create the heatmap
-                heatmap_fig.add_trace(
-                    go.Heatmap(
-                        z=new_z,
-                        x=new_x,
-                        y=names,
-                        colorscale="Viridis",
-                        colorbar=dict(),
-                        hoverongaps=False,
-                        zmin=np.min(new_z),
-                        zmax=np.max(new_z),
-                    )
+                heatmap_fig.update_traces(
+                    selector=dict(type="heatmap"),
+                    z=new_z,
+                    x=new_x,
+                    zmin=np.min(new_z),
+                    zmax=np.max(new_z),
                 )
 
                 day_sec = 60 * 60 * 24
                 # Update layout
                 heatmap_fig.update_layout(
                     title=f"{selected_aggregation} of {selected_metric} Heatmap (Normalized Values)",
-                    xaxis={"title": "Time", "range": [-0.5, day_sec / selected_time_window - 0.5]},
-                    yaxis={"title": "Day/Product"},
-                    clickmode="event+select",
-                    hovermode="x unified",
-                    plot_bgcolor="#f9f9f9",
+                    xaxis={"title": "Time", "range": [-0.5, len(new_x) - 0.5]},
                 )
-        else:  # No change
-            heatmap_fig = go.Figure(heatmap_fig)
 
         if price_relayout and timestamps_graph_labels:
             updated = True
