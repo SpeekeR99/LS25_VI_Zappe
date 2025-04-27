@@ -320,13 +320,13 @@ def main():
                     style={"marginBottom": "1rem"}
                 ),
 
-                html.P("Select a time window for the heatmap (in seconds):", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
+                html.P("Select a time window for the heatmap (in seconds) (60 - 43200):", style={"fontWeight": "bold", "marginBottom": "0.5rem"}),
                 dcc.Input(
                     id="time_window_input",
                     type="number",
                     value=time_window_aggregation,
-                    min=1,
-                    max=86400,
+                    min=60,
+                    max=43200,
                     step=1,
                     placeholder="Time Window (seconds)",
                     style={"width": "100%", "marginBottom": "1rem"}
