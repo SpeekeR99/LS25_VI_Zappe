@@ -16,22 +16,83 @@ from dash import Dash, dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
 
-timestamps_graph_labels = None
+# Networking settings for the Dash app
+HOST_ADDRESS = "127.0.0.1"
+PORT = 8080
+
+# Minute in seconds (60 seconds)
+MINUTE_SEC = 60
+# Hour in seconds (60 minutes)
+HOUR_SEC = 60 * MINUTE_SEC
+# Day in seconds (24 hours)
+DAY_SEC = 24 * HOUR_SEC
+
+# Global variables to store graph settings across callbacks
+timestamps = None  # Timestamps of the data
+ask_prices = None  # Ask prices
+bid_prices = None  # Bid prices
+
+timestamps_graph_labels = None  # Timestamps for the graph
+
+last_hover_label = None  # Last hovered label in the heatmap
+last_heatmap_click_count = None  # Last clicked point in the heatmap
+last_update_heatmap_click_count = None  # Last clicked "Apply" button in the heatmap
+
+chosen_aggregation = "Mean"  # Default aggregation function
+aggregation_functions_map = {  # Map aggregation function names to actual function pointers (Python and pointers?)
+    "Mean": np.mean,
+    "Median": np.median,
+    "Max": np.max,
+    "Min": np.min,
+    "Std": np.std
+}
+metric = "Ask Price 1"  # Default metric for aggregation
+metric_descriptions_map = {  # Map metric names to their respective descriptions
+    "Ask Price 1": "The lowest price a seller is willing to accept.",
+    "Bid Price 1": "The highest price a buyer is willing to pay.",
+    "Ask Volume 1": "The total number of offers available at the best ask price.",
+    "Bid Volume 1": "The total number of offers available at the best bid price.",
+    "Imbalance Index": "Measures the difference between buy and sell interest.",
+    "Frequency of Incoming Messages": "Moving average (5 minutes window) of how often order book updates are received.",
+    "Cancellations Rate": "Moving average (5 minutes window) of the rate at which orders are canceled.",
+    "High Quoting Activity": "Indicates rapid updates in order quotes (changes in volumes).",
+    "Unbalanced Quoting": "Shows bias towards one side of the market (buy or sell).",
+    "Low Execution Probability": "\"Chance\" of execution given the current quoting activity.",
+    "Trades Oppose Quotes": "Binary. 1 if the trade is on the opposite side of the more recently quoted side, 0 otherwise.",
+    "Cancels Oppose Trades": "Binary. 1 if the trade is on the opposite side of the more recently canceled side, 0 otherwise."
+}
+time_window_aggregation = 3600  # Default time window for aggregation (1 hour)
 
 
 def load_data(date, market_segment_id, security, level_depth=1):
+    """
+    Load the data from the given date, market segment ID, and security
+    :param date: Date of the data to load
+    :param market_segment_id: Market segment ID of the data to load
+    :param security: Security ID of the data to load
+    :param level_depth: Level depth of prices to load (default 1 -- Top of the Book)
+    :return: DataFrame with the data
+    """
     lobster_fp = f"data/{date}_{market_segment_id}_{security}_lobster_augmented.csv"
     data = pd.read_csv(lobster_fp, sep=",")
+
     # Throw away Ask Price i and Bid Price i if the ith level > level_depth
     i = level_depth + 1
     while True:
         if f"Ask Price {i}" not in data.columns and f"Bid Price {i}" not in data.columns:
             break
         data = data.drop(columns=[f"Ask Price {i}", f"Bid Price {i}"], errors="ignore")
+        i += 1
+
     return data
 
 
 def load_all_data(level_depth=1):
+    """
+    Load all data from the data folder
+    :param level_depth: Level depth of prices to load (default 1 -- Top of the Book)
+    :return: List of DataFrames with the data and a list of names for each DataFrame
+    """
     data = []
     names = []
 
@@ -45,22 +106,33 @@ def load_all_data(level_depth=1):
 
 
 def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_window=3600):
-    aggregated_data = []
-    day_sec = 60 * 60 * 24
+    """
+    Aggregate the data in the given time window
+    :param all_data: Loaded data in the form of a list of DataFrames
+    :param metric: Metric to aggregate
+    :param aggregation: Aggregation function to use
+    :param time_window: Time window for aggregation (in seconds)
+    :return: Aggregated data in the form of a list of numpy arrays
+    """
+    aggregated_data = []  # Result list
+
     for data in all_data:
-        tmp_agg = []
+        tmp_agg = []  # Temporary list to store the aggregated data for each time window
+
         timestamps = pd.to_datetime(data["Time"].values, unit="ns")
         timestamps_series = pd.Series(timestamps)
         seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
 
-        for i in range(0, day_sec, time_window):
+        for i in range(0, DAY_SEC, time_window):
             start_time = i
             end_time = i + time_window
+
             # Get the data in the time window
             data_in_window = data[(seconds_since_midnight >= start_time) & (seconds_since_midnight < end_time)]
             data_in_window = data_in_window[metric].dropna()
+
             # Aggregate the metric in the time window
-            if data_in_window.empty:
+            if data_in_window.empty:  # If there is no data in the time window, append NaN
                 tmp_agg.append(np.nan)
                 continue
             # Use the aggregation function passed as argument
@@ -78,23 +150,45 @@ def aggregate_data(all_data, metric="Ask Price 1", aggregation=np.mean, time_win
 
 
 def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, name, how_many_x_ticks=75):
+    """
+    Create the price graph with the given data
+    :param timestamps: Timestamps of the data
+    :param ask_prices: Ask prices
+    :param bid_prices: Bid prices
+    :param imbalance_indices: Imbalance index for each timestamp
+    :param freqs: Frequency of incoming messages for each timestamp
+    :param cancels: Cnaccellations rate for each timestamp
+    :param name: Name of the product (Day_MarketSegmentID_SecurityID)
+    :param how_many_x_ticks: Number of x ticks to show on the graph
+    :return: The price graph figure
+    """
     # Convert timestamps to HH:MM:SS format
     global timestamps_graph_labels
     timestamps_graph_labels = [datetime.datetime.fromtimestamp(int(ts) / 1e9).strftime("%H:%M:%S.%f") for ts in timestamps]
     # Convert to 0 - n
     timestamps_graph = list(range(len(timestamps_graph_labels)))
-    # Tick every 10000 timestamps
+    # Ticks
     tickvals = list(range(0, len(timestamps), len(timestamps) // how_many_x_ticks))
     ticklabels = [timestamps_graph_labels[i] for i in tickvals]
     # Go from HH:MM:SS.nnnnnn to truly HH:MM:SS
     ticklabels = [ts[:8] for ts in ticklabels]
 
+
     def interpolate_color(color1, color2, factor):
+        """
+        Utility function to interpolate between two colors
+        :param color1: Color 1
+        :param color2: Color 2
+        :param factor: Factor to interpolate between the two colors
+        :return: Interpolated color
+        """
         return tuple(int(color1[i] + factor * (color2[i] - color1[i])) for i in range(3))
+
 
     # Price graph
     price_graph_fig = FigureResampler(go.Figure(), default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
 
+    # Add traces for ask prices, bid prices, imbalance indices, frequencies, and cancellations
     for i, ask_price in enumerate(ask_prices, 1):
         price_graph_fig.add_trace(
             go.Scattergl(
@@ -150,7 +244,8 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
         hf_marker_color="rgb(255, 215, 0)"
     )
 
-    price_graph_fig.add_trace(  # Highlight trace for the future hovering on the HeatMap
+    # Highlight trace for the future hovering on the HeatMap
+    price_graph_fig.add_trace(
         go.Scattergl(
             name="Highlight",
             yaxis="y1",
@@ -161,8 +256,8 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
             hoverinfo="skip",
             showlegend=False,
         ),
-        hf_x=[],
-        hf_y=[],
+        hf_x=[],  # Empty x and y to avoid showing the trace
+        hf_y=[],  # Empty x and y to avoid showing the trace
     )
 
     price_graph_fig.update_layout(
@@ -182,35 +277,16 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
 
 
 def main():
+    """
+    Main function to run the Dash app
+    """
     app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-    level_depth = 5
-    chosen_aggregation = "Mean"
-    aggregation_functions_map = {
-        "Mean": np.mean,
-        "Median": np.median,
-        "Max": np.max,
-        "Min": np.min,
-        "Std": np.std
-    }
-    time_window_aggregation = 3600
-    metric = "Ask Price 1"
     print("Loading data...")
-    data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
-    data2 = load_data("20210319", "1176", "4578882", level_depth=level_depth)
-    all_data = [data, data2]
-    names = ["20210319_1176_2299728", "20210319_1176_4578882"]
-    # all_data, names = load_all_data(level_depth=level_depth)
-    # data = all_data[0]
+    level_depth = 5
+    all_data, names = load_all_data(level_depth=level_depth)
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
-
-    timestamps = data["Time"].values
-    ask_prices = [data[f"Ask Price {i}"].values for i in range(1, level_depth+1)]
-    bid_prices = [data[f"Bid Price {i}"].values for i in range(1, level_depth+1)]
-    imbalance_indices = data["Imbalance Index"].values
-    freqs = data["Frequency of Incoming Messages"].values
-    cancels = data["Cancellations Rate"].values
 
     # Placeholder for the price graph
     placeholder_fig = FigureResampler(go.Figure(), default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
@@ -229,12 +305,10 @@ def main():
 
     # Heatmap
     heatmap_fig = go.Figure()
-
-    # Create the heatmap
     heatmap_fig.add_trace(
         go.Heatmap(
             z=aggregated_data,
-            x=[f"{i // 3600:02d}:{i % 3600 // 60:02d}" for i in range(0, 24 * 3600, time_window_aggregation)],
+            x=[f"{i // HOUR_SEC:02d}:{i % HOUR_SEC // MINUTE_SEC:02d}" for i in range(0, DAY_SEC, time_window_aggregation)],
             y=names,
             colorscale="Viridis",
             colorbar=dict(),
@@ -243,20 +317,18 @@ def main():
             zmax=np.max(aggregated_data),
         )
     )
-
-    day_sec = 60 * 60 * 24
-    # Update layout
     heatmap_fig.update_layout(
         title=f"{chosen_aggregation} of {metric} Heatmap (Normalized Values)",
-        xaxis={"title": "Time", "range": [-0.5, day_sec / time_window_aggregation -0.5]},
+        xaxis={"title": "Time", "range": [-0.5, DAY_SEC / time_window_aggregation - 0.5]},
         yaxis={"title": "Day/Product"},
         clickmode="event+select",
         hovermode="x unified",
         plot_bgcolor="#f9f9f9",
     )
 
+    # HTML Layout
     app.layout = html.Div([
-        # Full-width Price Graph
+        # Price Graph at the top
         html.Div([
             dcc.Loading(
                 dcc.Graph(
@@ -282,9 +354,9 @@ def main():
             "backgroundColor": "#f9f9f9"
         }),
 
-        # FLEX CONTAINER: Heatmap + Settings
+        # Heatmap + Settings
         html.Div([
-            # SETTINGS - LEFT COLUMN
+            # Settings (on the left)
             html.Div([
                 html.H4("Heatmap Settings", style={"marginBottom": "1rem"}),
 
@@ -355,7 +427,7 @@ def main():
                 "minWidth": "250px"
             }),
 
-            # HEATMAP - RIGHT COLUMN
+            # Heatmap (on the right)
             html.Div([
                 dcc.Loading(
                     dcc.Graph(
@@ -381,19 +453,15 @@ def main():
                 "boxShadow": "0 4px 8px rgba(0,0,0,0.1)",
                 "borderRadius": "10px",
                 "backgroundColor": "#f9f9f9",
-                "minWidth": "0"  # important to prevent overflow
+                "minWidth": "0"
             })
         ], style={
             "display": "flex",
-            "flexWrap": "nowrap",  # force side-by-side
+            "flexWrap": "nowrap",
             "alignItems": "flex-start",
             "gap": "1rem",
         }),
     ], style={"padding": "0.5rem", "fontFamily": "Arial, sans-serif", "backgroundColor": "#f0f2f5"})
-
-    last_hover_label = None
-    last_heatmap_click_count = None
-    last_update_heatmap_click_count = None
 
 
     @app.callback(
@@ -401,21 +469,12 @@ def main():
         Input("metric_dropdown", "value")
     )
     def update_description(selected_metric):
-        descriptions = {
-            "Ask Price 1": "The lowest price a seller is willing to accept.",
-            "Bid Price 1": "The highest price a buyer is willing to pay.",
-            "Ask Volume 1": "The total number of offers available at the best ask price.",
-            "Bid Volume 1": "The total number of offers available at the best bid price.",
-            "Imbalance Index": "Measures the difference between buy and sell interest.",
-            "Frequency of Incoming Messages": "Moving average (5 minutes window) of how often order book updates are received.",
-            "Cancellations Rate": "Moving average (5 minutes window) of the rate at which orders are canceled.",
-            "High Quoting Activity": "Indicates rapid updates in order quotes (changes in volumes).",
-            "Unbalanced Quoting": "Shows bias towards one side of the market (buy or sell).",
-            "Low Execution Probability": "\"Chance\" of execution given the current quoting activity.",
-            "Trades Oppose Quotes": "Binary. 1 if the trade is on the opposite side of the more recently quoted side, 0 otherwise.",
-            "Cancels Oppose Trades": "Binary. 1 if the trade is on the opposite side of the more recently canceled side, 0 otherwise."
-        }
-        return descriptions[selected_metric] if selected_metric in descriptions else "No description available."
+        """
+        Updates the description of the selected metric in the heatmap settings
+        :param selected_metric: The user selected metric from the dropdown
+        :return: The description of the selected metric
+        """
+        return metric_descriptions_map[selected_metric] if selected_metric in metric_descriptions_map else "No description available."
 
 
     @app.callback(
@@ -426,62 +485,90 @@ def main():
         State("price_graph", "figure"),
     )
     def update_price_graph(heatmap_click, heatmap_hover, selected_time_window, price_fig):
-        nonlocal timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, last_heatmap_click_count, last_hover_label, time_window_aggregation
+        """
+        Updates the price graph based on several inputs:
+            1) Click in the heatmap -- changes the data in the price graph
+            2) Hover in the heatmap -- highlights the price graph (on the x axis)
+        :param heatmap_click: Click event in the heatmap
+        :param heatmap_hover: Hover event in the heatmap
+        :param selected_time_window: Selected time window for the heatmap (State only)
+        :param price_fig: Price graph figure (Current State -- will be changed during the callback)
+        :return: Updated price graph figure
+        """
+        global timestamps, ask_prices, bid_prices, last_heatmap_click_count, last_hover_label
 
+        # Boolean to check if the graph was actually updated
         updated = False
+
+        # Transform the price graph to a FigureResampler object if it is not already
         if isinstance(price_fig, dict):
             price_fig = FigureResampler(price_fig, default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
 
         # Change the price graph based on the heatmap click
         if heatmap_click and last_heatmap_click_count != heatmap_click:
+            updated = True
             last_heatmap_click_count = heatmap_click
+            last_hover_label = None  # Click resets the hover as well
+
             # Get the clicked point
             clicked_point = heatmap_click["points"][0]
             # Get the index of the clicked point
             clicked_index = names.index(clicked_point["y"])
+
             # Get the data for the clicked point
             clicked_data = all_data[clicked_index]
 
-            timestamps = clicked_data["Time"].values
-            ask_prices = [clicked_data[f"Ask Price {i}"].values for i in range(1, level_depth + 1)]
-            bid_prices = [clicked_data[f"Bid Price {i}"].values for i in range(1, level_depth + 1)]
+            timestamps = clicked_data["Time"].values  # Updates the global timestamps for others to use
+            ask_prices = [clicked_data[f"Ask Price {i}"].values for i in range(1, level_depth + 1)]  # Same here
+            bid_prices = [clicked_data[f"Bid Price {i}"].values for i in range(1, level_depth + 1)]  # And here
             imbalance_indices = clicked_data["Imbalance Index"].values
             freqs = clicked_data["Frequency of Incoming Messages"].values
             cancels = clicked_data["Cancellations Rate"].values
 
-            # Price graph
+            # Price graph update
             price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index])
             price_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Resampler callback
 
-            last_hover_label = None  # Click resets the hover as well
-            updated = True
-
+        # Update highlight if hovering on the heatmap
         if heatmap_hover and last_hover_label != heatmap_hover:
             updated = True
-            hovered_label = heatmap_hover["points"][0]["x"]
 
+            # Get the hovered label
+            hovered_label = heatmap_hover["points"][0]["x"]
             last_hover_label = hovered_label
 
+            # Convert hovered label to seconds
             h, m = map(int, hovered_label.split(":"))
-            hovered_sec = h * 3600 + m * 60
+            hovered_sec = h * HOUR_SEC + m * MINUTE_SEC
 
-            # Calculate start and end of the range (e.g., ±30 min = 1800 sec)
-            highlight_start = hovered_sec - 3600
-            highlight_end = hovered_sec + selected_time_window - 3600
+            # Calculate start and end of the range
+            highlight_start = hovered_sec - HOUR_SEC
+            highlight_end = hovered_sec + selected_time_window - HOUR_SEC
 
-            def find_index_for_sec(sec, ts_array):
-                for i, ts in enumerate(ts_array):
+
+            def find_index_for_sec(sec):
+                """
+                Find the index of the first timestamp that is greater than or equal to sec
+                :param sec: The second to find the index for
+                :return: The index of the first timestamp that is greater than or equal to sec
+                """
+                global timestamps
+                timestamps_series = pd.Series(pd.to_datetime(timestamps, unit="ns"))
+                seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
+                for i, ts in enumerate(seconds_since_midnight):
                     if ts >= sec:
                         return i
-                return len(ts_array) - 1
+                return len(seconds_since_midnight) - 1
 
-            timestamps_series = pd.Series(pd.to_datetime(timestamps, unit="ns"))
-            seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
-            x0 = find_index_for_sec(highlight_start, seconds_since_midnight)
-            x1 = find_index_for_sec(highlight_end, seconds_since_midnight)
 
-            y_min = np.nanmin(np.array(bid_prices + ask_prices))
-            y_max = np.nanmax(np.array(bid_prices + ask_prices))
+            # Find the indices for the start and end of the highlight
+            x0 = find_index_for_sec(highlight_start)
+            x1 = find_index_for_sec(highlight_end)
+
+            # Find the min and max y values for the highlight
+            prices = np.array(bid_prices + ask_prices)
+            y_min = np.nanmin(prices)
+            y_max = np.nanmax(prices)
 
             # Define rectangle corners
             highlight_x = [
@@ -491,7 +578,6 @@ def main():
                 x0,  # Bottom-left
                 x0,  # Closing the path
             ]
-
             highlight_y = [
                 y_max,  # Top-left
                 y_max,  # Top-right
@@ -500,26 +586,31 @@ def main():
                 y_max,  # Closing the path
             ]
 
+            # Update the highlight trace but keep the current x-range zoom
             current_range = price_fig.layout["xaxis"]["range"] if "xaxis" in price_fig.layout and "range" in price_fig.layout["xaxis"] else None
             price_fig.update_traces(
                 selector=dict(name="Highlight"),
                 x=highlight_x,
                 y=highlight_y,
             )
-            if current_range:
+            if current_range:  # Restore the zoom if it existed
                 price_fig.update_layout(
                     xaxis={"range": current_range},
                 )
 
+        # If the user stopped hovering, it will be None, remove the highlight
         if heatmap_hover is None and last_hover_label is not None:
             updated = True
             last_hover_label = None
+
+            # Remove the highlight
             price_fig.update_traces(
                 selector=dict(name="Highlight"),
                 x=[],
                 y=[],
             )
 
+        # Update the figure only if it was actually updated, else return no_update
         return price_fig if updated else dash.no_update
 
 
@@ -533,21 +624,40 @@ def main():
         State("heatmap_graph", "figure"),
     )
     def update_heatmap(update_heatmap_button, price_relayout, selected_metric, selected_aggregation, selected_time_window, heatmap_fig):
-        global timestamps_graph_labels
-        nonlocal last_update_heatmap_click_count, time_window_aggregation
-        time_window_aggregation = selected_time_window
+        """
+        Updates the heatmap based on several inputs:
+            1) Click on the "Apply" button -- changes everything about the Heatmap (metric, aggregation, time window)
+            2) Zoom in the price graph -- changes the x-axis of the heatmap
+        :param update_heatmap_button: "Apply" button click event
+        :param price_relayout: Price graph zoom event
+        :param selected_metric: User selected metric from the dropdown (State only)
+        :param selected_aggregation: User selected aggregation function from the dropdown (State only)
+        :param selected_time_window: User selected time window for the heatmap (State only)
+        :param heatmap_fig: Heatmap figure (Current State -- will be changed during the callback)
+        :return: Updated heatmap figure
+        """
+        global last_update_heatmap_click_count
 
+        # Boolean to check if the graph was actually updated
         updated = False
-        heatmap_fig = go.Figure(heatmap_fig)
 
+        # Transform the heatmap graph to a Figure object if it is not already
+        if isinstance(heatmap_fig, dict):
+            heatmap_fig = go.Figure(heatmap_fig)
+
+        # Update the whole heatmap, if the user clicked the button to apply the changes
         if update_heatmap_button and last_update_heatmap_click_count != update_heatmap_button:
             last_update_heatmap_click_count = update_heatmap_button
 
-            new_x = [f"{int(i // 3600):02d}:{int(i % 3600 // 60):02d}" for i in range(0, 24 * 3600, selected_time_window)]
+            # Calculate the new X and Z data for the heatmap
+            new_x = [f"{int(i // HOUR_SEC):02d}:{int(i % HOUR_SEC // MINUTE_SEC):02d}" for i in range(0, DAY_SEC, selected_time_window)]
             new_z = aggregate_data(all_data, metric=selected_metric, aggregation=aggregation_functions_map[selected_aggregation], time_window=selected_time_window)
 
+            # Check if the user didn't just click "Apply" button without choosing any changes
             if new_x != heatmap_fig["data"][0]["x"] or not np.array_equal(new_z, heatmap_fig["data"][0]["z"]):
                 updated = True
+
+                # Update the heatmap data
                 heatmap_fig.update_traces(
                     selector=dict(type="heatmap"),
                     z=new_z,
@@ -555,14 +665,12 @@ def main():
                     zmin=np.min(new_z),
                     zmax=np.max(new_z),
                 )
-
-                day_sec = 60 * 60 * 24
-                # Update layout
                 heatmap_fig.update_layout(
                     title=f"{selected_aggregation} of {selected_metric} Heatmap (Normalized Values)",
                     xaxis={"title": "Time", "range": [-0.5, len(new_x) - 0.5]},
                 )
 
+        # Update the x-axis of the heatmap based on the price graph zoom
         if price_relayout and timestamps_graph_labels:
             updated = True
 
@@ -570,6 +678,7 @@ def main():
             x0 = price_relayout.get("xaxis.range[0]", 0)
             x1 = price_relayout.get("xaxis.range[1]", len(timestamps_graph_labels) - 1)
 
+            # Clamp x0 and x1 to the range of the heatmap
             x0 = max(0, min(x0, len(timestamps_graph_labels) - 1))
             x1 = max(0, min(x1, len(timestamps_graph_labels) - 1))
 
@@ -577,36 +686,35 @@ def main():
             t0 = timestamps_graph_labels[int(x0)]
             t1 = timestamps_graph_labels[int(x1)]
 
-            # Split time into hours, minutes, and seconds
+            # Split time into hours, minutes, and seconds and convert to seconds
             t0_parts = t0.split(":")
             t1_parts = t1.split(":")
-
             hour0, minute0, second0 = int(t0_parts[0]), int(t0_parts[1]), int(t0_parts[2].split(".")[0])
             hour1, minute1, second1 = int(t1_parts[0]), int(t1_parts[1]), int(t1_parts[2].split(".")[0])
-
-            t0_sec = hour0 * 3600 + minute0 * 60 + second0
-            t1_sec = hour1 * 3600 + minute1 * 60 + second1
+            t0_sec = hour0 * HOUR_SEC + minute0 * MINUTE_SEC + second0
+            t1_sec = hour1 * HOUR_SEC + minute1 * MINUTE_SEC + second1
 
             # Get heatmap x-axis data
             heatmap_x = heatmap_fig.data[0]["x"]
-            heatmap_sec = [int(x.split(":")[0]) * 3600 + int(x.split(":")[1]) * 60 for x in heatmap_x]
+            heatmap_sec = [int(x.split(":")[0]) * HOUR_SEC + int(x.split(":")[1]) * MINUTE_SEC for x in heatmap_x]
 
             # Find closest times in heatmap
             t0_index = max(i for i, sec in enumerate(heatmap_sec) if sec <= t0_sec)
             t1_index = min(i for i, sec in enumerate(heatmap_sec) if sec >= t1_sec)
-
             t0_index = round(max(0, min(t0_index, len(heatmap_sec) - 1)) - 0.5, 3)
             t1_index = round(max(0, min(t1_index, len(heatmap_sec) - 1)) - 0.5, 3)
 
+            # Update the heatmap x-axis range
             heatmap_fig.update_layout(
                 xaxis={"range": [t0_index, t1_index]},
             )
 
+        # Update the figure only if it was actually updated, else return no_update
         return heatmap_fig if updated else dash.no_update
 
 
     # Run the Dash app
-    app.run(host="127.0.0.1", port=8080, debug=False)
+    app.run(host=HOST_ADDRESS, port=PORT, debug=False)
 
 
 if __name__ == "__main__":
