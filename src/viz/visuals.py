@@ -471,8 +471,16 @@ def main():
                 :return: The index of the first timestamp that is greater than or equal to sec
                 """
                 global timestamps
+
+                # Fail-safe check
+                if timestamps is None:
+                    return 0
+
+                # Convert timestamps to seconds since midnight
                 timestamps_series = pd.Series(pd.to_datetime(timestamps, unit="ns"))
                 seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
+
+                # Find the index of the first timestamp that is greater than or equal to sec (O(n))
                 for i, ts in enumerate(seconds_since_midnight):
                     if ts >= sec:
                         return i
