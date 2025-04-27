@@ -202,7 +202,10 @@ def main():
 
     print("Loading data...")
     level_depth = 5
-    all_data, names = load_all_data(level_depth=level_depth)
+    data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
+    all_data = [data]
+    names = ["20210319_1176_2299728"]
+    # all_data, names = load_all_data(level_depth=level_depth)
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
