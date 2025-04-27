@@ -6,7 +6,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pandas as pd
 import datetime
-import copy
 
 import plotly.graph_objects as go
 import plotly_resampler
@@ -423,11 +422,10 @@ def main():
         Output("price_graph", "figure"),
         Input("heatmap_graph", "clickData"),
         Input("heatmap_graph", "hoverData"),
-        Input("heatmap_graph", "relayoutData"),
         State("time_window_input", "value"),
         State("price_graph", "figure"),
     )
-    def update_price_graph(heatmap_click, heatmap_hover, heatmap_relayout, selected_time_window, price_fig):
+    def update_price_graph(heatmap_click, heatmap_hover, selected_time_window, price_fig):
         nonlocal timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, last_heatmap_click_count, last_hover_label, time_window_aggregation
 
         updated = False
@@ -502,56 +500,24 @@ def main():
                 y_max,  # Closing the path
             ]
 
-            price_fig.data = [trace for trace in price_fig.data if "Highlight" not in trace.name]
-            price_fig.add_trace(
-                go.Scattergl(
-                    name="Highlight",
-                    yaxis="y1",
-                    mode="lines",
-                    fill="toself",
-                    line=dict(width=2, color="rgba(25, 25, 100, 1)"),
-                    fillcolor="rgba(185, 215, 255, 0.3)",
-                    hoverinfo="skip",
-                    showlegend=False,
-                ),
-                hf_x=highlight_x,
-                hf_y=highlight_y,
+            current_range = price_fig.layout["xaxis"]["range"] if "xaxis" in price_fig.layout and "range" in price_fig.layout["xaxis"] else None
+            price_fig.update_traces(
+                selector=dict(name="Highlight"),
+                x=highlight_x,
+                y=highlight_y,
             )
+            if current_range:
+                price_fig.update_layout(
+                    xaxis={"range": current_range},
+                )
 
         if heatmap_hover is None and last_hover_label is not None:
             updated = True
             last_hover_label = None
-            price_fig.data = [trace for trace in price_fig.data if "Highlight" not in trace.name]
-
-        # Handle zoom sync
-        if heatmap_relayout:
-            updated = True
-            day_sec = 60 * 60 * 24
-
-            # Get the current x-range from the price graph zoom
-            x0 = heatmap_relayout.get("xaxis.range[0]", -0.5)
-            x1 = heatmap_relayout.get("xaxis.range[1]", day_sec / time_window_aggregation - 0.5)
-
-            x0 = max(-0.5, min(x0, day_sec / time_window_aggregation - 0.5))
-            x1 = max(-0.5, min(x1, day_sec / time_window_aggregation - 0.5))
-
-            # Convert x-range to corresponding timestamps
-            t0 = x0 * time_window_aggregation
-            t1 = x1 * time_window_aggregation
-
-            def find_index_for_sec(sec, ts_array):
-                for i, ts in enumerate(ts_array):
-                    if ts >= sec:
-                        return i
-                return len(ts_array) - 1
-
-            timestamps_series = pd.Series(pd.to_datetime(timestamps, unit="ns"))
-            seconds_since_midnight = (timestamps_series - timestamps_series.dt.normalize()).dt.total_seconds()
-            start = find_index_for_sec(t0, seconds_since_midnight)
-            end = find_index_for_sec(t1, seconds_since_midnight)
-
-            price_fig.update_layout(
-                xaxis={"range": [start, end]},
+            price_fig.update_traces(
+                selector=dict(name="Highlight"),
+                x=[],
+                y=[],
             )
 
         return price_fig if updated else dash.no_update
@@ -568,7 +534,8 @@ def main():
     )
     def update_heatmap(update_heatmap_button, price_relayout, selected_metric, selected_aggregation, selected_time_window, heatmap_fig):
         global timestamps_graph_labels
-        nonlocal last_update_heatmap_click_count
+        nonlocal last_update_heatmap_click_count, time_window_aggregation
+        time_window_aggregation = selected_time_window
 
         updated = False
 
