@@ -329,12 +329,12 @@ def main():
                     "fontSize": "1rem",
                     "fontWeight": "bold",
                     "color": "#fff",
-                    "backgroundColor": "#007BFF",  # Modern blue
+                    "backgroundColor": "#28a745",
                     "border": "none",
                     "borderRadius": "8px",
-                    "boxShadow": "0 4px 6px rgba(0, 123, 255, 0.3)",
+                    "boxShadow": "0 4px 6px rgba(40, 167, 69, 0.3)",
                     "cursor": "pointer",
-                    "transition": "background-color 0.3s ease-in-out",
+                    "transition": "background-color 0.3s ease-in-out, transform 0.2s ease-in-out",
                 }),
             ], style={
                 "flex": "0 0 300px",  # Fixed width
