@@ -202,7 +202,10 @@ def main():
 
     print("Loading data...")
     level_depth = 5
-    all_data, names = load_all_data(level_depth=level_depth)
+    data = load_data("20210319", "1176", "2299728", level_depth=level_depth)
+    all_data = [data]
+    names = ["20210319_1176_2299728"]
+    # all_data, names = load_all_data(level_depth=level_depth)
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
@@ -329,12 +332,12 @@ def main():
                     "fontSize": "1rem",
                     "fontWeight": "bold",
                     "color": "#fff",
-                    "backgroundColor": "#007BFF",  # Modern blue
+                    "backgroundColor": "#28a745",
                     "border": "none",
                     "borderRadius": "8px",
-                    "boxShadow": "0 4px 6px rgba(0, 123, 255, 0.3)",
+                    "boxShadow": "0 4px 6px rgba(40, 167, 69, 0.3)",
                     "cursor": "pointer",
-                    "transition": "background-color 0.3s ease-in-out",
+                    "transition": "background-color 0.3s ease-in-out, transform 0.2s ease-in-out",
                 }),
             ], style={
                 "flex": "0 0 300px",  # Fixed width
