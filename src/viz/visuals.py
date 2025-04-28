@@ -82,7 +82,7 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
     """
     # Convert timestamps to HH:MM:SS format
     global timestamps_graph_labels
-    timestamps_graph_labels = [datetime.datetime.fromtimestamp(int(ts) / 1e9).strftime("%H:%M:%S.%f") for ts in timestamps]
+    timestamps_graph_labels = [datetime.datetime.fromtimestamp(int(ts) / 1e9 - HOUR_SEC).strftime("%H:%M:%S.%f") for ts in timestamps]
     # Convert to 0 - n
     timestamps_graph = list(range(len(timestamps_graph_labels)))
     # Ticks
@@ -186,10 +186,24 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
         yaxis3={"title": "Incoming messages (per sec)", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
         yaxis4={"title": "Cancellations rate", "side": "right", "overlaying": "y", "anchor": "free", "autoshift": True},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        # ----- For thesis images export -----
+        # title={"text": '', "font": {"size": 48}},
+        # xaxis={'title': {'text': 'Timestamp', 'font': {'size': 36}}, "tickmode": "array", "tickvals": tickvals, "ticktext": ticklabels, "tickfont": {"size": 32}},
+        # yaxis={'title': {'text': 'Price', 'font': {'size': 36}}, 'side': 'left', "tickfont": {"size": 32}},
+        # yaxis2={'title': {'text': 'Imbalance index', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "range": [-1, 1], "tickfont": {"size": 32}},
+        # yaxis3={'title': {'text': 'Incoming messages (per sec)', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "tickfont": {"size": 32}},
+        # yaxis4={'title': {'text': 'Cancellations rate', 'font': {'size': 36}}, 'side': 'right', 'overlaying': 'y', "anchor": "free", "autoshift": True, "tickfont": {"size": 32}},
+        # legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1, "font": {"size": 32}},
+        # ----- For thesis images export -----
         clickmode="event+select",
         hovermode="x unified",
         plot_bgcolor="#f9f9f9",
     )
+
+    # Transform the ugly "[R] <TraceName> ~<Number>" to "<TraceName>"
+    for trace in price_graph_fig.data:
+        trace.name = trace.name.split("~")[0].strip()
+        trace.name = trace.name.replace("[R]", "").strip()
 
     return price_graph_fig
 
@@ -460,8 +474,8 @@ def main():
             hovered_sec = h * HOUR_SEC + m * MINUTE_SEC
 
             # Calculate start and end of the range
-            highlight_start = hovered_sec - HOUR_SEC
-            highlight_end = hovered_sec + selected_time_window - HOUR_SEC
+            highlight_start = hovered_sec
+            highlight_end = hovered_sec + selected_time_window
 
 
             def find_index_for_sec(sec):
@@ -538,6 +552,12 @@ def main():
                 x=[],
                 y=[],
             )
+
+        if updated:
+            # Transform the ugly "[R] <TraceName> ~<Number>" to "<TraceName>"
+            for trace in price_fig.data:
+                trace.name = trace.name.split("~")[0].strip()
+                trace.name = trace.name.replace("[R]", "").strip()
 
         # Update the figure only if it was actually updated, else return no_update
         return price_fig if updated else dash.no_update
