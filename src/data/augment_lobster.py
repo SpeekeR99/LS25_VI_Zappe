@@ -8,17 +8,20 @@ import numpy as np
 import pandas as pd
 import datetime
 
+# Default values
 MARKET_ID = "XEUR"
 DATE = "20191202"
 MARKET_SEGMENT_ID = "688"
 SECURITY_ID = "4128839"
 
+# User defined values
 if len(sys.argv) == 5:
     MARKET_ID = sys.argv[1]
     DATE = sys.argv[2]
     MARKET_SEGMENT_ID = sys.argv[3]
     SECURITY_ID = sys.argv[4]
 
+# Input and output file paths
 INPUT_FILE_PATH = f"data/{DATE}_{MARKET_SEGMENT_ID}_{SECURITY_ID}_lobster.csv"
 OUTPUT_FILE_PATH = f"data/{DATE}_{MARKET_SEGMENT_ID}_{SECURITY_ID}_lobster_augmented.csv"
 

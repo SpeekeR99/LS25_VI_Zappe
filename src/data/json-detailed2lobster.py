@@ -7,20 +7,24 @@ import json
 import time
 import csv
 
+# Default values
 MARKET_ID = "XEUR"
 DATE = "20191202"
 MARKET_SEGMENT_ID = "688"
 SECURITY_ID = "4128839"
 
+# User defined values
 if len(sys.argv) == 5:
     MARKET_ID = sys.argv[1]
     DATE = sys.argv[2]
     MARKET_SEGMENT_ID = sys.argv[3]
     SECURITY_ID = sys.argv[4]
 
+# Input and output file paths
 INPUT_FILE_PATH = f"data/{MARKET_ID}_{DATE}_{MARKET_SEGMENT_ID}_{SECURITY_ID}_detailed.json"
 OUTPUT_FILE_PATH = f"data/{DATE}_{MARKET_SEGMENT_ID}_{SECURITY_ID}_lobster.csv"
 
+# FIX protocol template IDs
 ORDER_ADD = 13100
 ORDER_MODIFY = 13101
 ORDER_MODIFY_SAME_PRIORITY = 13106
@@ -29,6 +33,7 @@ ORDER_MASS_DELETE = 13103
 PARTIAL_ORDER_EXECUTION = 13105
 FULL_ORDER_EXECUTION = 13104
 
+# Load the data
 print("Loading data...")
 tic = time.time()
 if len(sys.argv) == 2:
@@ -46,13 +51,16 @@ instructions = {}
 
 print("Processing data...")
 tic = time.time()
+# Downloading is done in parts, thus iterate over the downloaded parts
 for i, part in enumerate(data):
     print(f"Processing part {i + 1}/{len(data)}")
 
+    # Iterate over the transactions in the part
     for transaction_array in part["Transactions"]:
         for transaction in transaction_array:
             # MsgSeqNum = transaction["MessageHeader"]["MsgSeqNum"]
 
+            # Handle the ORDER ADD message as simple ADD instruction
             if transaction["MessageHeader"]["TemplateID"] == ORDER_ADD:
                 TrdRegTSTimeIn = transaction["TrdRegTSTimeIn"]
                 # TrdRegTSTimePriority = transaction["OrderDetails"]["TrdRegTSTimePriority"]
@@ -68,6 +76,7 @@ for i, part in enumerate(data):
 
                 # instructions[MsgSeqNum] = [(TrdRegTSTimePriority, "ADD", (Price, DisplayQty, Side))]
 
+            # Handle the ORDER MODIFY message as simple DELETE and ADD instruction
             elif transaction["MessageHeader"]["TemplateID"] == ORDER_MODIFY:
                 TrdRegTSTimeIn = transaction["TrdRegTSTimeIn"]
                 # TrdRegTSTimePriority = transaction["OrderDetails"]["TrdRegTSTimePriority"]
@@ -94,6 +103,7 @@ for i, part in enumerate(data):
                 # instructions[MsgSeqNum] = [(TrdRegTSTimePriority, "DELETE", (PrevPrice, PrevDisplayQty, Side)),
                 #                            (TrdRegTSTimePriority, "ADD", (Price, DisplayQty, Side))]
 
+            # Handle the ORDER MODIFY SAME PRIORITY message as simple DELETE and ADD instruction
             elif transaction["MessageHeader"]["TemplateID"] == ORDER_MODIFY_SAME_PRIORITY:
                 # TrdRegTSTimeIn = transaction["TrdRegTSTimeIn"]
                 TrdRegTSTimePriority = transaction["OrderDetails"]["TrdRegTSTimePriority"]
@@ -114,6 +124,7 @@ for i, part in enumerate(data):
                 # instructions[MsgSeqNum] = [(TransactTime, "DELETE", (Price, PrevDisplayQty, Side)),
                 #                            (TransactTime, "ADD", (Price, DisplayQty, Side))]
 
+            # Handle the ORDER DELETE message as simple DELETE instruction
             elif transaction["MessageHeader"]["TemplateID"] == ORDER_DELETE:
                 TrdRegTSTimeIn = transaction["TrdRegTSTimeIn"]
                 # TrdRegTSTimePriority = transaction["OrderDetails"]["TrdRegTSTimePriority"]
@@ -130,6 +141,7 @@ for i, part in enumerate(data):
 
                 # instructions[MsgSeqNum] = [(TransactTime, "DELETE", (Price, DisplayQty, Side))]
 
+            # Handle the ORDER MASS DELETE message as its own instruction
             elif transaction["MessageHeader"]["TemplateID"] == ORDER_MASS_DELETE:
                 TransactTime = transaction["TransactTime"]
 
@@ -140,6 +152,7 @@ for i, part in enumerate(data):
 
                 # instructions[MsgSeqNum] = [(TransactTime, "ORDER_MASS_DELETE", ())]
 
+            # Handle the PARTIAL ORDER EXECUTION message as simple DELETE and ADD instruction
             elif transaction["MessageHeader"]["TemplateID"] == PARTIAL_ORDER_EXECUTION:
                 TrdRegTSTimePriority = transaction["TrdRegTSTimePriority"]
 
@@ -155,6 +168,7 @@ for i, part in enumerate(data):
 
                 # instructions[MsgSeqNum] = [(TrdRegTSTimePriority, "PARTIAL_ORDER_EXECUTION", (LastPx, LastQty, Side))]
 
+            # Handle the FULL ORDER EXECUTION message as simple DELETE instruction
             elif transaction["MessageHeader"]["TemplateID"] == FULL_ORDER_EXECUTION:
                 TrdRegTSTimePriority = transaction["TrdRegTSTimePriority"]
 
@@ -186,15 +200,18 @@ del data
 print("Creating orderbook...")
 
 # Initialize data structures
-lobster_buy = [[] for _ in range(max_index)]
-lobster_sell = [[] for _ in range(max_index)]
+lobster_buy = [[] for _ in range(max_index)]  # Buy side
+lobster_sell = [[] for _ in range(max_index)]  # Sell side
 timestamps = list(dict(sorted({k: v for k, v in instructions.items() if k is not None}.items())).keys())
 timestamps += [timestamps[-1]] * (max_index - len(timestamps))
-cancellations_buy = {}
-cancellations_sell = {}
-trades_buy = {}
-trades_sell = {}
+cancellations_buy = {}  # Cancellations on buy side
+cancellations_sell = {}  # Cancellations on sell side
+trades_buy = {}  # Trades on buy side
+trades_sell = {}  # Trades on sell side
 levels = 100
+
+BUY_SIDE = 1  # FIX protocol defines buy side as 1
+SELL_SIDE = 2  # FIX protocol defines sell side as 2
 
 tic = time.time()
 for i, (timestamp, array) in enumerate(instructions.items()):
@@ -207,6 +224,7 @@ for i, (timestamp, array) in enumerate(instructions.items()):
         lobster_buy[i] = lobster_buy[i - 1].copy()
         lobster_sell[i] = lobster_sell[i - 1].copy()
 
+    # Initialize cancellations and trades
     if timestamp not in cancellations_buy:
         cancellations_buy[timestamp] = 0
     if timestamp not in cancellations_sell:
@@ -216,22 +234,25 @@ for i, (timestamp, array) in enumerate(instructions.items()):
     if timestamp not in trades_sell:
         trades_sell[timestamp] = 0
 
+    # Iterate over the instructions
     for j, value in enumerate(array):
         if value[0] == "DELETE" or value[0] == "FULL_ORDER_EXECUTION" or value[0] == "PARTIAL_ORDER_EXECUTION":
             price, display_qty, side = value[1]
 
-            if side == 1:
+            # Choose the correct side to be modified
+            if side == BUY_SIDE:
                 lobster = lobster_buy
             else:
                 lobster = lobster_sell
 
+            # Update cancellations and trades
             if value[0] == "DELETE":
-                if side == 1:
+                if side == BUY_SIDE:
                     cancellations_buy[timestamp] += 1
                 else:
                     cancellations_sell[timestamp] += 1
             if value[0] == "FULL_ORDER_EXECUTION" or value[0] == "PARTIAL_ORDER_EXECUTION":
-                if side == 1:
+                if side == BUY_SIDE:
                     trades_buy[timestamp] += 1
                 else:
                     trades_sell[timestamp] += 1
@@ -256,7 +277,8 @@ for i, (timestamp, array) in enumerate(instructions.items()):
         if value[0] == "ADD":
             price, display_qty, side = value[1]
 
-            if side == 1:
+            # Choose the correct side to be modified
+            if side == BUY_SIDE:
                 lobster = lobster_buy
             else:
                 lobster = lobster_sell
@@ -268,7 +290,7 @@ for i, (timestamp, array) in enumerate(instructions.items()):
             else:  # For-Else
                 if len(lobster[i]) < levels:
                     lobster[i].append((price, display_qty))
-                elif side == 1:
+                elif side == BUY_SIDE:
                     # Find the worst price
                     worst_price = min(lobster_buy[i], key=lambda x: x[0])[0]
                     if price > worst_price:
@@ -277,7 +299,7 @@ for i, (timestamp, array) in enumerate(instructions.items()):
                             if p == worst_price:
                                 lobster_buy[i][k] = (price, display_qty)
                                 break
-                elif side == 2:
+                elif side == SELL_SIDE:
                     # Find the worst price
                     worst_price = max(lobster_sell[i], key=lambda x: x[0])[0]
                     if price < worst_price:
@@ -287,6 +309,7 @@ for i, (timestamp, array) in enumerate(instructions.items()):
                                 lobster_sell[i][k] = (price, display_qty)
                                 break
 
+        # Order mass delete is defined as a special case of completely emptying the orderbook
         if value[0] == "ORDER_MASS_DELETE":
             # Delete all orders
             lobster_buy[i] = []
