@@ -1,0 +1,7 @@
+numpy
+pandas
+plotly
+plotly-resampler
+dash
+dash-bootstrap-components
+requests
