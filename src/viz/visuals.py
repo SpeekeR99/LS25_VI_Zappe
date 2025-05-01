@@ -36,6 +36,7 @@ bid_prices = None  # Bid prices
 
 timestamps_graph_labels = None  # Timestamps for the graph
 
+is_loading = False  # Flag to indicate if the data is loading
 last_hover_label = None  # Last hovered label in the heatmap
 last_heatmap_click_count = None  # Last clicked point in the heatmap
 last_update_heatmap_click_count = None  # Last clicked "Apply" button in the heatmap
@@ -198,8 +199,8 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
 
         for i, ts in enumerate(anomaly_timestamps):
             # Add line start and end with None in between to break lines
-            x_vals.extend([ts, ts])
-            y_vals.extend([y_min, y_max])
+            x_vals.extend([ts, ts, None])
+            y_vals.extend([y_min, y_max, None])
 
         # Add the anomalies to the graph
         price_graph_fig.add_trace(
@@ -207,7 +208,7 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
                 name="Detected Anomaly",
                 yaxis="y1",
                 mode="lines",
-                line=dict(width=1, color="rgba(255, 0, 0, 0.1)"),
+                line=dict(width=1, color="rgba(0, 0, 0, 0.75)"),
                 hoverinfo="skip",
             ),
             hf_x=x_vals,
@@ -464,33 +465,18 @@ def main():
     @app.callback(
         Output("price_graph", "figure"),
         Input("heatmap_graph", "clickData"),
-        Input("heatmap_graph", "hoverData"),
-        State("time_window_input", "value"),
-        State("price_graph", "figure"),
     )
-    def update_price_graph(heatmap_click, heatmap_hover, selected_time_window, price_fig):
+    def update_price_graph(heatmap_click):
         """
-        Updates the price graph based on several inputs:
-            1) Click in the heatmap -- changes the data in the price graph
-            2) Hover in the heatmap -- highlights the price graph (on the x axis)
+        Updates the price graph -- changes the data in the price graph
         :param heatmap_click: Click event in the heatmap
-        :param heatmap_hover: Hover event in the heatmap
-        :param selected_time_window: Selected time window for the heatmap (State only)
-        :param price_fig: Price graph figure (Current State -- will be changed during the callback)
         :return: Updated price graph figure
         """
-        global timestamps, ask_prices, bid_prices, last_heatmap_click_count, last_hover_label
-
-        # Boolean to check if the graph was actually updated
-        updated = False
-
-        # Transform the price graph to a FigureResampler object if it is not already
-        if isinstance(price_fig, dict):
-            price_fig = FigureResampler(price_fig, default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
+        global timestamps, ask_prices, bid_prices, last_heatmap_click_count, last_hover_label, is_loading
 
         # Change the price graph based on the heatmap click
         if heatmap_click and last_heatmap_click_count != heatmap_click:
-            updated = True
+            is_loading = True  # Set loading to true
             last_heatmap_click_count = heatmap_click
             last_hover_label = None  # Click resets the hover as well
 
@@ -512,6 +498,34 @@ def main():
             # Price graph update
             price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index], detections[clicked_index])
             price_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Resampler callback
+
+            is_loading = False  # Set loading to false
+
+            return price_fig
+
+        return dash.no_update
+
+
+    @app.callback(
+        Output("price_graph", "figure", allow_duplicate=True),
+        Input("heatmap_graph", "hoverData"),
+        State("time_window_input", "value"),
+        State("price_graph", "figure"),
+        prevent_initial_call=True,
+    )
+    def update_highlight(heatmap_hover, selected_time_window, price_fig):
+        global last_hover_label
+
+        # If the data is being loaded, no hovering is needed
+        if is_loading:
+            return dash.no_update
+
+        # Boolean to check if the graph was actually updated
+        updated = False
+
+        # Transform the price graph to a FigureResampler object if it is not already
+        if isinstance(price_fig, dict):
+            price_fig = FigureResampler(price_fig, default_downsampler=plotly_resampler.MinMaxLTTB(parallel=True))
 
         # Update highlight if hovering on the heatmap
         if heatmap_hover and last_hover_label != heatmap_hover:
