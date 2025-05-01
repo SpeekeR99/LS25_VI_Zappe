@@ -15,7 +15,7 @@ import dash
 from dash import Dash, dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
-from src.viz.dataloader import load_data, load_all_data, aggregate_data
+from src.viz.dataloader import load_all_data, aggregate_data
 
 
 # Networking settings for the Dash app
@@ -67,7 +67,7 @@ time_window_aggregation = 3600  # Default time window for aggregation (1 hour)
 
 
 
-def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, name, how_many_x_ticks=75):
+def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, name, detected_anomalies, how_many_x_ticks=75):
     """
     Create the price graph with the given data
     :param timestamps: Timestamps of the data
@@ -77,6 +77,7 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
     :param freqs: Frequency of incoming messages for each timestamp
     :param cancels: Cnaccellations rate for each timestamp
     :param name: Name of the product (Day_MarketSegmentID_SecurityID)
+    :param detected_anomalies: Detected anomalies (y_pred, anomaly_proba)
     :param how_many_x_ticks: Number of x ticks to show on the graph
     :return: The price graph figure
     """
@@ -162,6 +163,57 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
         hf_marker_color="rgb(255, 215, 0)"
     )
 
+    # If there are detected anomalies, add them to the graph as vertical lines
+    if detected_anomalies is not None:
+        y_pred, anomaly_proba = detected_anomalies
+
+        # Make sure that y_pred and anomaly_proba are the same length as timestamps
+        y_pred = np.pad(y_pred, (0, len(timestamps) - len(y_pred)), "constant", constant_values=1)
+        y_pred = y_pred[:len(timestamps)]
+        anomaly_proba = np.pad(anomaly_proba, (0, len(timestamps) - len(anomaly_proba)), "constant", constant_values=0)
+        anomaly_proba = anomaly_proba[:len(timestamps)]
+
+        # Get the anomalies
+        anomaly_alpha = anomaly_proba[y_pred == -1]
+        anomaly_timestamps = [timestamps_graph[i] for i in range(len(y_pred)) if y_pred[i] == -1]
+
+        # Normalize the alpha to [0, 1]
+        anomaly_alpha = (anomaly_alpha - anomaly_alpha.min()) / (anomaly_alpha.max() - anomaly_alpha.min())
+        # Replace NaN values with 0
+        anomaly_alpha = np.nan_to_num(anomaly_alpha)
+
+        if len(timestamps) > 500_000:
+            anomaly_alpha *= 0.1  # Reduce the alpha for better visualization
+        if len(timestamps) > 1_000_000:
+            anomaly_alpha *= 0.5  # Reduce the alpha even more
+
+        # Y axis values
+        prices = np.array(bid_prices + ask_prices)
+        y_min = np.nanmin(prices)
+        y_max = np.nanmax(prices)
+
+        # Prepare all anomaly lines for one trace
+        x_vals = []
+        y_vals = []
+
+        for i, ts in enumerate(anomaly_timestamps):
+            # Add line start and end with None in between to break lines
+            x_vals.extend([ts, ts])
+            y_vals.extend([y_min, y_max])
+
+        # Add the anomalies to the graph
+        price_graph_fig.add_trace(
+            go.Scattergl(
+                name="Detected Anomaly",
+                yaxis="y1",
+                mode="lines",
+                line=dict(width=1, color="rgba(255, 0, 0, 0.1)"),
+                hoverinfo="skip",
+            ),
+            hf_x=x_vals,
+            hf_y=y_vals,
+        )
+
     # Highlight trace for the future hovering on the HeatMap
     price_graph_fig.add_trace(
         go.Scattergl(
@@ -216,7 +268,7 @@ def main():
 
     print("Loading data...")
     level_depth = 5
-    all_data, names = load_all_data(level_depth=level_depth)
+    all_data, names, detections = load_all_data(level_depth=level_depth)
     aggregated_data = aggregate_data(all_data, metric=metric, aggregation=aggregation_functions_map[chosen_aggregation], time_window=time_window_aggregation)
     print("Data loaded.")
 
@@ -458,7 +510,7 @@ def main():
             cancels = clicked_data["Cancellations Rate"].values
 
             # Price graph update
-            price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index])
+            price_fig = create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, freqs, cancels, names[clicked_index], detections[clicked_index])
             price_fig.register_update_graph_callback(app=app, graph_id="price_graph")  # Resampler callback
 
         # Update highlight if hovering on the heatmap
