@@ -194,26 +194,46 @@ def create_price_graph(timestamps, ask_prices, bid_prices, imbalance_indices, fr
         y_max = np.nanmax(prices)
 
         # Prepare all anomaly lines for one trace
+        # For some reason, some days don't like the Nones, some do
         x_vals = []
+        x_vals_with_Nones = []
         y_vals = []
+        y_vals_with_Nones = []
 
         for i, ts in enumerate(anomaly_timestamps):
+            # For some reason, some days don't like the Nones, some do
+            x_vals.extend([ts, ts])
+            y_vals.extend([y_min, y_max])
             # Add line start and end with None in between to break lines
-            x_vals.extend([ts, ts, None])
-            y_vals.extend([y_min, y_max, None])
+            x_vals_with_Nones.extend([ts, ts, None])
+            y_vals_with_Nones.extend([y_min, y_max, None])
 
         # Add the anomalies to the graph
-        price_graph_fig.add_trace(
-            go.Scattergl(
-                name="Detected Anomaly",
-                yaxis="y1",
-                mode="lines",
-                line=dict(width=1, color="rgba(0, 0, 0, 0.75)"),
-                hoverinfo="skip",
-            ),
-            hf_x=x_vals,
-            hf_y=y_vals,
-        )
+        try:
+            price_graph_fig.add_trace(
+                go.Scattergl(
+                    name="Detected Anomaly",
+                    yaxis="y1",
+                    mode="lines",
+                    line=dict(width=1, color="rgba(0, 0, 0, 0.75)"),
+                    hoverinfo="skip",
+                ),
+                hf_x=x_vals_with_Nones,
+                hf_y=y_vals_with_Nones,
+            )
+        # For some reason, some days don't like the Nones, some do
+        except Exception as e:
+            price_graph_fig.add_trace(
+                go.Scattergl(
+                    name="Detected Anomaly",
+                    yaxis="y1",
+                    mode="lines",
+                    line=dict(width=1, color="rgba(0, 0, 0, 0.75)"),
+                    hoverinfo="skip",
+                ),
+                hf_x=x_vals,
+                hf_y=y_vals,
+            )
 
     # Highlight trace for the future hovering on the HeatMap
     price_graph_fig.add_trace(
